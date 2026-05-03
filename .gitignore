@@ -1,0 +1,28 @@
+# Secrets / credenciales
+.env
+ia_scout/.env
+ia_scout/credentials.json
+ia_scout/token.json
+
+# Logs
+ia_scout/logs/*.log
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editores
+.vscode/
+.idea/
+*.swp
