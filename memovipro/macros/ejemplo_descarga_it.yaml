@@ -1,0 +1,47 @@
+version: 1
+nombre: ejemplo_descarga_it
+descripcion: Plantilla de descarga de listado IT por DNI. Adapta los selectores a tu app real.
+ventana_principal: AppRRHH
+salida:
+  carpeta_descargas: C:/Descargas/IT
+  patron_renombrado: IT_{DNI}_{YYYYMMDD}.xlsx
+pasos:
+  - tipo: focus_window
+    titulo: AppRRHH
+    descripcion: Llevar la app al frente
+  - tipo: click_control
+    selector:
+      control_type: Button
+      name: Nuevo
+    descripcion: Pulsar botón Nuevo
+  - tipo: type_text
+    selector:
+      control_type: Edit
+      auto_id: txtDni
+    valor: "{DNI}"
+    descripcion: Escribir DNI
+  - tipo: click_control
+    selector:
+      control_type: Button
+      name: Buscar
+    descripcion: Pulsar Buscar
+  - tipo: wait_until
+    selector:
+      control_type: Button
+      name: Exportar
+    timeout_s: 20
+    descripcion: Esperar a que aparezca Exportar
+    extra:
+      condicion:
+        tipo: control_visible
+  - tipo: click_control
+    selector:
+      control_type: Button
+      name: Exportar
+    descripcion: Pulsar Exportar
+  - tipo: handle_libreoffice_save
+    valor: IT_{DNI}_{YYYYMMDD}.xlsx
+    timeout_s: 20
+    extra:
+      carpeta: C:/Descargas/IT
+    descripcion: Guardar en LibreOffice con nombre normalizado

@@ -1,0 +1,16 @@
+{
+  "ventana_principal_default": "",
+  "polling_watchdog_ms": 300,
+  "paso_timeout_default_s": 15,
+  "paso_reintentos_default": 2,
+  "carpeta_macros": "macros",
+  "carpeta_data": "data",
+  "carpeta_screenshots": "data/screenshots",
+  "patron_log_incidencias": "incidencias_{YYYYMMDD}.xlsx",
+  "hotkey_panico": "ctrl+alt+escape",
+  "popup_titulos_ignorar": [],
+  "libreoffice": {
+    "proceso": "soffice.bin",
+    "titulo_save_as": "Guardar como"
+  }
+}
