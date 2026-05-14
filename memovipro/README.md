@@ -17,11 +17,24 @@ botones.
   `{HHMMSS}`, `{NOMBRE}`, … (lo que haya en el Excel de DNIs).
 - Iterador de DNIs con **checkpoint**: si la ejecución se interrumpe, al
   relanzar continúa solo con los pendientes.
+- **Fingerprint de macro**: si modificas la macro, el checkpoint se invalida
+  automáticamente para evitar marcar como completados DNIs con una versión
+  obsoleta de los pasos.
 - **Watchdog de popups** en hilo aparte: cualquier ventana emergente nueva
   durante la reproducción se detecta, se hace screenshot, se anota en Excel
   con el DNI culpable, y la reproducción pasa al siguiente DNI.
 - **Excel acumulativo** `data/incidencias_YYYYMMDD.xlsx` con una fila por
   evento (OK o KO) e hipervínculo al PNG del popup.
+- **Modo dry-run / simulación**: resalta los controles que se *clicarían* sin
+  ejecutar acciones reales — ideal para depurar una macro nueva.
+- **Reintento automático** de los DNIs KO al final del lote, con timeouts × 2
+  (la mayoría de errores son transitorios).
+- **Notificación por email** al terminar (SMTP) con resumen HTML + Excel de
+  incidencias adjunto. Se configura en `config.json`.
+- **Inspector de controles embebido**: clic en cualquier botón y MemoviPro
+  rellena el `selector` (nombre/AutomationId/ClassName) del paso seleccionado.
+- **Logs estructurados** en `logs/run_YYYYMMDD.log` con rotación diaria y
+  retención de 30 días (loguru).
 - GUI PyQt6 con 3 pestañas: editor de macros, panel de ejecución, visor de
   incidencias.
 - Hotkey de pánico `Ctrl+Alt+Esc` para abortar instantáneamente.
@@ -54,7 +67,8 @@ memovipro/
 │   └── screenshots/
 ├── tools/
 │   └── migrar_legacy.py  # Convierte JSON antiguos de Memovi a YAML
-├── tests/                # 10 tests unitarios (no requieren Windows)
+├── tests/                # 17 tests unitarios (no requieren Windows)
+├── logs/                 # logs diarios con rotación
 ├── RepartoPA.ps1         # Script de distribución (con los fixes)
 └── requirements.txt
 ```

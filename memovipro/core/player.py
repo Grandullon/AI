@@ -12,6 +12,8 @@ try:
 except Exception:
     _HAS_PYWINAUTO = False
 
+from loguru import logger
+
 from .excel_logger import ExcelLogger, Incidencia
 from .popup_watchdog import PopupEvent, PopupWatchdog
 from .screenshot import capturar_pantalla_completa
@@ -49,6 +51,7 @@ class Player:
         ignorar_popups: list[str] | None = None,
         polling_watchdog_ms: int = 300,
         on_status: Callable[[RunStatus], None] | None = None,
+        dry_run: bool = False,
     ):
         self.macro = macro
         self.screenshots_dir = Path(screenshots_dir)
@@ -56,6 +59,7 @@ class Player:
         self.ignorar_popups = ignorar_popups or []
         self.polling_watchdog_ms = polling_watchdog_ms
         self.on_status = on_status
+        self.dry_run = dry_run
         self._popup_lock = threading.Lock()
         self._popup_pendiente: PopupEvent | None = None
         self._watchdog: PopupWatchdog | None = None
@@ -88,9 +92,10 @@ class Player:
             on_popup=self._on_popup,
             polling_ms=self.polling_watchdog_ms,
             ignorar_titulos=self.ignorar_popups,
-            cerrar_automaticamente=True,
+            cerrar_automaticamente=not self.dry_run,
         )
         self._watchdog.start()
+        logger.info("Iniciando DNI={} · macro={} · dry_run={}", dni, self.macro.nombre, self.dry_run)
 
         try:
             for idx, paso in enumerate(self.macro.pasos):
@@ -155,6 +160,9 @@ class Player:
             self._type_text(paso)
             return
         if tipo == StepType.SEND_KEYS:
+            if self.dry_run:
+                logger.info("[dry-run] send_keys → {}", paso.valor)
+                return
             pwkeyboard.send_keys(paso.valor or "")
             return
         if tipo == StepType.WAIT_UNTIL:
@@ -205,16 +213,38 @@ class Player:
 
     def _click_control(self, paso: Step) -> None:
         ctrl = self._resolve_control(paso)
+        if self.dry_run:
+            try:
+                ctrl.draw_outline(colour="red", thickness=3)
+            except Exception:
+                pass
+            logger.info("[dry-run] click_control → {}", paso.descripcion or paso.selector)
+            time.sleep(0.4)
+            return
         ctrl.click_input()
 
     def _click_xy(self, x: int, y: int) -> None:
+        if self.dry_run:
+            logger.info("[dry-run] click_at_xy → ({}, {})", x, y)
+            return
         from pywinauto import mouse
         mouse.click(coords=(x, y))
 
     def _type_text(self, paso: Step) -> None:
         if paso.selector and not paso.selector.is_empty():
             ctrl = self._resolve_control(paso)
+            if self.dry_run:
+                try:
+                    ctrl.draw_outline(colour="blue", thickness=3)
+                except Exception:
+                    pass
+                logger.info('[dry-run] type_text "{}" en {}', paso.valor, paso.selector)
+                time.sleep(0.4)
+                return
             ctrl.set_focus()
+        elif self.dry_run:
+            logger.info('[dry-run] type_text "{}"', paso.valor)
+            return
         pwkeyboard.send_keys(paso.valor or "", with_spaces=True, pause=0.02)
 
     def _wait_until(self, paso: Step) -> None:

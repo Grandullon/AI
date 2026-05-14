@@ -43,14 +43,25 @@ def cargar_dnis(path: str | Path, columna: str | None = None) -> list[dict]:
 class Checkpoint:
     """Mantiene la lista de DNIs ya completados para una macro y día.
 
-    Permite reanudar una ejecución sin repetir los OK.
+    Permite reanudar una ejecución sin repetir los OK. Si se pasa
+    `macro_fingerprint`, se guarda dentro del checkpoint: cuando se carga
+    uno antiguo con fingerprint distinto, los OK previos se descartan
+    automáticamente (los pasos cambiaron, ya no son comparables).
     """
 
-    def __init__(self, macro: str, path_dir: str | Path, fecha: str | None = None):
+    def __init__(
+        self,
+        macro: str,
+        path_dir: str | Path,
+        fecha: str | None = None,
+        macro_fingerprint: str | None = None,
+    ):
         self.macro = macro
         self.fecha = fecha or datetime.now().strftime("%Y%m%d")
+        self.fingerprint = macro_fingerprint
         self.path = Path(path_dir) / f"checkpoint_{self._sanitize(macro)}_{self.fecha}.json"
-        self._data = {"ok": [], "ko": []}
+        self._data = {"ok": [], "ko": [], "fingerprint": ""}
+        self.invalidado = False
         self._load()
 
     @staticmethod
@@ -58,14 +69,27 @@ class Checkpoint:
         return "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
 
     def _load(self) -> None:
-        if self.path.exists():
-            try:
-                with self.path.open(encoding="utf-8") as f:
-                    self._data = json.load(f)
-                    self._data.setdefault("ok", [])
-                    self._data.setdefault("ko", [])
-            except Exception:
-                self._data = {"ok": [], "ko": []}
+        if not self.path.exists():
+            if self.fingerprint:
+                self._data["fingerprint"] = self.fingerprint
+            return
+        try:
+            with self.path.open(encoding="utf-8") as f:
+                cargado = json.load(f)
+        except Exception:
+            cargado = {"ok": [], "ko": [], "fingerprint": ""}
+        cargado.setdefault("ok", [])
+        cargado.setdefault("ko", [])
+        cargado.setdefault("fingerprint", "")
+
+        if self.fingerprint and cargado["fingerprint"] and cargado["fingerprint"] != self.fingerprint:
+            self.invalidado = True
+            self._data = {"ok": [], "ko": [], "fingerprint": self.fingerprint}
+            self._save()
+        else:
+            if self.fingerprint and not cargado["fingerprint"]:
+                cargado["fingerprint"] = self.fingerprint
+            self._data = cargado
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

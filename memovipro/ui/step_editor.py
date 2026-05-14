@@ -21,6 +21,8 @@ from PyQt6.QtWidgets import (
 
 from core.step_model import Macro, SalidaConfig, Selector, Step, StepType
 
+from .inspector import CapturaSelector, Inspector
+
 
 COLS = ["#", "Tipo", "Selector", "Valor / Título", "Timeout (s)", "Opc.", "Descripción"]
 
@@ -67,6 +69,7 @@ class StepEditor(QWidget):
             ("Eliminar", self._remove_step),
             ("Subir", lambda: self._move(-1)),
             ("Bajar", lambda: self._move(1)),
+            ("Inspector", self._launch_inspector),
             ("Cargar YAML", self._load),
             ("Guardar YAML", self._save),
         ]:
@@ -74,6 +77,10 @@ class StepEditor(QWidget):
             b.clicked.connect(slot)
             botones.addWidget(b)
         layout.addLayout(botones)
+
+        self._inspector = Inspector()
+        self._inspector.captured.connect(self._on_inspect_captured)
+        self._inspector.error.connect(self._on_inspect_error)
 
     def _refresh_table(self):
         self.tabla.setRowCount(0)
@@ -177,3 +184,37 @@ class StepEditor(QWidget):
             QMessageBox.information(self, "Guardado", f"Macro guardada en {path}")
         except Exception as exc:
             QMessageBox.warning(self, "Error", f"No se pudo guardar: {exc}")
+
+    def _launch_inspector(self):
+        QMessageBox.information(
+            self,
+            "Inspector",
+            "Haz clic en cualquier control de la ventana objetivo.\n"
+            "MemoviPro capturará su selector simbólico.",
+        )
+        self._inspector.empezar()
+
+    def _on_inspect_captured(self, cap: CapturaSelector):
+        row = self.tabla.currentRow()
+        sel = Selector(
+            control_type=cap.control_type,
+            name=cap.name,
+            auto_id=cap.auto_id,
+            class_name=cap.class_name,
+        )
+        if row >= 0:
+            self.macro.pasos[row].selector = sel
+            self._refresh_table()
+            QMessageBox.information(self, "Selector capturado", f"Aplicado al paso #{row + 1}:\n\n{cap.yaml_snippet()}")
+        else:
+            paso = Step(
+                tipo=StepType.CLICK_CONTROL,
+                selector=sel,
+                descripcion=f"Click en {sel.name or sel.control_type or '?'}",
+            )
+            self.macro.pasos.append(paso)
+            self._refresh_table()
+            QMessageBox.information(self, "Selector capturado", f"Añadido como nuevo paso:\n\n{cap.yaml_snippet()}")
+
+    def _on_inspect_error(self, msg: str):
+        QMessageBox.warning(self, "Inspector", msg)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
@@ -131,6 +133,23 @@ class Macro:
     def load(cls, path: str | Path) -> "Macro":
         with Path(path).open("r", encoding="utf-8") as f:
             return cls.from_dict(yaml.safe_load(f))
+
+    def fingerprint(self) -> str:
+        """Hash estable del contenido funcional de la macro (sin descripciones).
+
+        Cambia si: cambia un paso, su tipo, selector, valor o timeout.
+        NO cambia si solo cambia la descripción o el nombre del archivo.
+        """
+        payload = {
+            "version": self.version,
+            "ventana_principal": self.ventana_principal,
+            "pasos": [
+                {k: v for k, v in p.to_dict().items() if k != "descripcion"}
+                for p in self.pasos
+            ],
+        }
+        blob = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        return hashlib.sha256(blob).hexdigest()[:16]
 
 
 _PLACEHOLDER_RE = re.compile(r"\{([A-Z_][A-Z0-9_]*)\}")

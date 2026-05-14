@@ -5,12 +5,24 @@
   "paso_reintentos_default": 2,
   "carpeta_macros": "macros",
   "carpeta_data": "data",
+  "carpeta_logs": "logs",
   "carpeta_screenshots": "data/screenshots",
   "patron_log_incidencias": "incidencias_{YYYYMMDD}.xlsx",
   "hotkey_panico": "ctrl+alt+escape",
   "popup_titulos_ignorar": [],
+  "reintentar_ko_al_final": true,
   "libreoffice": {
     "proceso": "soffice.bin",
     "titulo_save_as": "Guardar como"
+  },
+  "smtp": {
+    "host": "",
+    "port": 587,
+    "user": "",
+    "password": "",
+    "use_tls": true,
+    "from_addr": "",
+    "recipients": [],
+    "enviar_al_terminar": false
   }
 }

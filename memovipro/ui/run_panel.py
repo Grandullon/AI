@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Callable
 
@@ -19,8 +20,24 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.notifier import SmtpConfig
 from core.runner import MacroRunner, RunSummary
 from core.step_model import Macro
+
+
+CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.json"
+
+
+def _cargar_smtp() -> tuple[SmtpConfig | None, bool]:
+    """Devuelve (config, enviar_al_terminar) leyendo config.json."""
+    try:
+        with CONFIG_PATH.open(encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception:
+        return None, False
+    smtp = cfg.get("smtp", {}) or {}
+    enviar = bool(smtp.get("enviar_al_terminar", False))
+    return SmtpConfig.from_dict(smtp), enviar
 
 
 class _RunThread(QThread):
@@ -91,6 +108,22 @@ class RunPanel(QWidget):
         self.solo_pendientes.setChecked(True)
         layout.addWidget(self.solo_pendientes)
 
+        self.dry_run = QCheckBox("Modo simulación / dry-run (resalta controles, no toca nada)")
+        self.dry_run.setChecked(False)
+        layout.addWidget(self.dry_run)
+
+        self.reintentar = QCheckBox("Reintentar automáticamente los KO al final (timeout × 2)")
+        self.reintentar.setChecked(True)
+        layout.addWidget(self.reintentar)
+
+        self.notificar = QCheckBox("Enviar email resumen al terminar (usa config.json → smtp)")
+        smtp_cfg, enviar_default = _cargar_smtp()
+        self.notificar.setChecked(enviar_default and bool(smtp_cfg and smtp_cfg.is_complete()))
+        self.notificar.setEnabled(bool(smtp_cfg and smtp_cfg.is_complete()))
+        if not (smtp_cfg and smtp_cfg.is_complete()):
+            self.notificar.setToolTip("Configura SMTP en config.json para activar")
+        layout.addWidget(self.notificar)
+
         btns = QHBoxLayout()
         self.run_btn = QPushButton("▶  Ejecutar")
         self.run_btn.clicked.connect(self._start)
@@ -140,12 +173,21 @@ class RunPanel(QWidget):
 
         self.log_view.clear()
         self.progress.setValue(0)
+
+        smtp_cfg, _ = _cargar_smtp()
+        smtp_para_usar = smtp_cfg if (self.notificar.isChecked() and smtp_cfg and smtp_cfg.is_complete()) else None
+
         self._runner = MacroRunner(
             macro=macro,
             excel_dnis=excel_path,
             screenshots_dir=self.data_dir / "screenshots",
             data_dir=self.data_dir,
+            dry_run=self.dry_run.isChecked(),
+            reintentar_ko_al_final=self.reintentar.isChecked(),
+            smtp_config=smtp_para_usar,
         )
+        if self._runner.checkpoint.invalidado:
+            self._append_log("⚠ La macro cambió: checkpoint anterior descartado (todos los DNIs se procesarán).")
         self._thread = _RunThread(self._runner, solo_pendientes=self.solo_pendientes.isChecked())
         self._thread.log.connect(self._append_log)
         self._thread.progress.connect(self._on_progress)
