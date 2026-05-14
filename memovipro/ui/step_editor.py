@@ -169,7 +169,13 @@ class StepEditor(QWidget):
         self.tabla.selectRow(new)
 
     def _load(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Cargar macro", str(self.macros_dir), "YAML (*.yaml *.yml)")
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Cargar macro",
+            str(self.macros_dir),
+            "YAML (*.yaml *.yml)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
         if not path:
             return
         try:
@@ -181,16 +187,37 @@ class StepEditor(QWidget):
         self._refresh_table()
 
     def _save(self):
+        """Guarda la macro a `macros/<nombre>.yaml` sin abrir diálogo de archivo.
+
+        Evitamos QFileDialog porque el diálogo nativo de Windows usa shell
+        COM y se cuelga con cierta frecuencia en apps empaquetadas con
+        PyInstaller. La carpeta y el nombre vienen del propio editor.
+        """
         self._sync_from_form()
-        default = self.macros_dir / f"{self.macro.nombre}.yaml"
-        path, _ = QFileDialog.getSaveFileName(self, "Guardar macro", str(default), "YAML (*.yaml)")
-        if not path:
-            return
+        nombre = (self.macro.nombre or "").strip() or "macro_sin_nombre"
+        # Sanitizar nombre para que sea un fichero válido.
+        nombre = "".join(c if c.isalnum() or c in "-_." else "_" for c in nombre)
+        if not nombre.endswith((".yaml", ".yml")):
+            nombre = f"{nombre}.yaml"
+        self.macros_dir.mkdir(parents=True, exist_ok=True)
+        path = self.macros_dir / nombre
+
+        if path.exists():
+            resp = QMessageBox.question(
+                self,
+                "Sobrescribir",
+                f"Ya existe '{path.name}' en la carpeta macros.\n¿Sobrescribir?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if resp != QMessageBox.StandardButton.Yes:
+                return
         try:
             self.macro.save(path)
-            QMessageBox.information(self, "Guardado", f"Macro guardada en {path}")
         except Exception as exc:
             QMessageBox.warning(self, "Error", f"No se pudo guardar: {exc}")
+            return
+        QMessageBox.information(self, "Guardado", f"Macro guardada en:\n{path}")
 
     def _launch_recorder(self):
         from PyQt6.QtWidgets import QDialog

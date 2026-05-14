@@ -156,12 +156,20 @@ class SchedulePanel(QWidget):
             self.macro_combo.addItem(p.stem)
 
     def _browse(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Seleccionar Excel/CSV", "", "Datos (*.xlsx *.xls *.csv)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Seleccionar Excel/CSV", "",
+            "Datos (*.xlsx *.xls *.csv)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
         if path:
             self.excel_path.setText(path)
 
     def _browse_exe(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Seleccionar memovipro-run.exe", "", "Ejecutables (*.exe)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Seleccionar memovipro-run.exe", "",
+            "Ejecutables (*.exe)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
         if path:
             self.exe_path.setText(path)
 

@@ -152,7 +152,13 @@ class RunPanel(QWidget):
             self.macro_combo.addItem(p.name, str(p))
 
     def _browse_excel(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Seleccionar Excel/CSV de DNIs", "", "Datos (*.xlsx *.xls *.csv)")
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Seleccionar Excel/CSV de DNIs",
+            "",
+            "Datos (*.xlsx *.xls *.csv)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
         if path:
             self.excel_path.setText(path)
 
