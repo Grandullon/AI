@@ -1,0 +1,95 @@
+name: Build MemoviPro Windows .exe
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_cli:
+        description: "Compilar memovipro-run.exe (CLI sin GUI)"
+        type: boolean
+        default: true
+      build_gui:
+        description: "Compilar memovipro-gui.exe (GUI)"
+        type: boolean
+        default: true
+  push:
+    branches:
+      - claude/improve-keyboard-capture-lG0z3
+    paths:
+      - "memovipro/**"
+      - ".github/workflows/build-windows.yml"
+
+jobs:
+  build:
+    name: Build .exe en Windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: memovipro
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: memovipro/requirements.txt
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Tests rápidos (no bloquean si fallan los E2E)
+        run: |
+          pip install pytest
+          pytest tests/ -v
+        continue-on-error: false
+
+      - name: Compilar memovipro-run.exe (CLI)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_cli }}
+        run: pyinstaller memovipro-run.spec --clean --noconfirm
+
+      - name: Compilar memovipro-gui.exe (GUI)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_gui }}
+        run: pyinstaller memovipro-gui.spec --clean --noconfirm
+
+      - name: Listar artefactos generados
+        run: |
+          dir dist
+        shell: cmd
+
+      - name: Subir memovipro-run.exe
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_cli }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: memovipro-run-exe
+          path: memovipro/dist/memovipro-run.exe
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Subir memovipro-gui.exe
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_gui }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: memovipro-gui-exe
+          path: memovipro/dist/memovipro-gui.exe
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Subir paquete completo (exes + macros + config + ps1)
+        uses: actions/upload-artifact@v4
+        with:
+          name: memovipro-paquete-completo
+          path: |
+            memovipro/dist/*.exe
+            memovipro/macros/
+            memovipro/config.json
+            memovipro/RunMacro.ps1
+            memovipro/RepartoPA.ps1
+            memovipro/README.md
+          retention-days: 30
+          if-no-files-found: error
