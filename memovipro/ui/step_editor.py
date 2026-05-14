@@ -25,7 +25,7 @@ from .inspector import CapturaSelector, Inspector
 from .record_dialog import RecordDialog
 
 
-COLS = ["#", "Tipo", "Selector", "Valor / Título", "Timeout (s)", "Opc.", "Descripción"]
+COLS = ["#", "Tipo", "Selector", "Valor / Título", "Espera (s)", "Timeout (s)", "Opc.", "Descripción"]
 
 
 class StepEditor(QWidget):
@@ -99,11 +99,13 @@ class StepEditor(QWidget):
                 if paso.selector.control_type:
                     sel_txt = f"[{paso.selector.control_type}] {sel_txt}"
             valor = paso.valor or paso.titulo or ""
+            espera = f"{paso.delay_before_s:.2f}" if paso.delay_before_s > 0 else ""
             valores = [
                 str(i + 1),
                 paso.tipo.value,
                 sel_txt,
                 valor,
+                espera,
                 f"{paso.timeout_s:g}",
                 "✓" if paso.opcional else "",
                 paso.descripcion,

@@ -52,6 +52,7 @@ class Player:
         polling_watchdog_ms: int = 300,
         on_status: Callable[[RunStatus], None] | None = None,
         dry_run: bool = False,
+        velocidad: float = 1.0,
     ):
         self.macro = macro
         self.screenshots_dir = Path(screenshots_dir)
@@ -60,6 +61,9 @@ class Player:
         self.polling_watchdog_ms = polling_watchdog_ms
         self.on_status = on_status
         self.dry_run = dry_run
+        # velocidad: 1.0 = original. 2.0 = el doble de rápido (delays /2).
+        # 0.5 = el doble de lento. 0 o negativo = sin pausas.
+        self.velocidad = velocidad
         self._popup_lock = threading.Lock()
         self._popup_pendiente: PopupEvent | None = None
         self._watchdog: PopupWatchdog | None = None
@@ -102,6 +106,10 @@ class Player:
                 if self._abort.is_set():
                     break
                 paso_render = render_step(paso, ctx)
+                # Respetar el delay grabado, ajustado por velocidad.
+                self._esperar_delay(paso_render)
+                if self._abort.is_set():
+                    break
                 if self.on_status:
                     self.on_status(RunStatus(dni=dni, paso_idx=idx, descripcion=paso_render.descripcion or paso_render.tipo.value))
                 try:
@@ -125,6 +133,24 @@ class Player:
                 self._watchdog.stop()
                 self._watchdog.join(timeout=1.0)
                 self._watchdog = None
+
+    def _esperar_delay(self, paso: Step) -> None:
+        """Espera `paso.delay_before_s / velocidad` antes del paso.
+
+        Si velocidad <= 0 se omiten las pausas. El sleep se hace en
+        tramos cortos para poder responder a abort sin esperas largas.
+        """
+        if paso.delay_before_s <= 0 or self.velocidad <= 0:
+            return
+        restante = paso.delay_before_s / self.velocidad
+        # Tope absoluto: nunca más de 30s entre dos pasos.
+        restante = min(restante, 30.0)
+        while restante > 0:
+            if self._abort.is_set():
+                return
+            paso_t = min(0.2, restante)
+            time.sleep(paso_t)
+            restante -= paso_t
 
     def _ejecutar_paso(self, paso: Step, idx: int) -> None:
         intentos = paso.reintentos + 1

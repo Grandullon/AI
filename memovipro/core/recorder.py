@@ -54,6 +54,7 @@ class EventoCrudo:
     button: str = ""
     valor: str = ""
     descripcion: str = ""
+    timestamp: float = 0.0  # time.time() del evento, para calcular delays al reproducir
 
 
 def _selector_desde_punto(x: int, y: int) -> tuple[Selector | None, str]:
@@ -168,6 +169,7 @@ class Recorder:
                 x=int(x), y=int(y),
                 button=str(button),
                 descripcion=f"Click ({x},{y})",
+                timestamp=time.time(),
             ))
 
     def _on_press(self, key):
@@ -189,6 +191,7 @@ class Recorder:
                     tipo="send_keys",
                     valor=token,
                     descripcion=f"Tecla {token}",
+                    timestamp=time.time(),
                 ))
 
     def _flush_text(self, force: bool = False) -> None:
@@ -196,10 +199,13 @@ class Recorder:
             return
         if not force and (time.time() - self._buf.ultimo_ts) < self.FLUSH_TEXT_AFTER_S:
             return
+        # Para texto agrupado, el timestamp es el del último carácter tecleado.
+        ts = self._buf.ultimo_ts or time.time()
         self.eventos_crudos.append(EventoCrudo(
             tipo="type_text",
             valor=self._buf.texto,
             descripcion=f'Escribir "{self._buf.texto[:30]}"',
+            timestamp=ts,
         ))
         self._buf = _BufferTexto()
 
@@ -228,23 +234,35 @@ class Recorder:
         return None
 
     # ---- Construcción de la Macro (puede ser lenta si se resuelven selectores) ----
+    # Cap a la pausa entre eventos: nadie quiere reproducir una pausa de varios
+    # minutos porque el usuario se fue a por café a mitad de la grabación.
+    MAX_DELAY_S = 30.0
+
     @staticmethod
     def construir_macro(
         eventos: list[EventoCrudo],
         resolver_selectores: bool = True,
         on_progress: Callable[[int, int], None] | None = None,
     ) -> Macro:
-        """Convierte eventos crudos en una `Macro`.
+        """Convierte eventos crudos en una `Macro` con delays preservados.
 
-        Si `resolver_selectores` es True y pywinauto está disponible,
-        intenta convertir cada `click_at_xy` en `click_control`. La
-        operación es lenta (decenas–cientos de ms por clic) y debe
-        ejecutarse fuera del hilo de la GUI.
+        El campo `delay_before_s` de cada paso refleja el tiempo real
+        transcurrido entre el evento anterior y éste (limitado a
+        MAX_DELAY_S para evitar pausas absurdamente largas).
         """
         total_clicks = sum(1 for e in eventos if e.tipo == "click")
         n_click = 0
         pasos: list[Step] = []
+        prev_ts: float | None = None
         for evt in eventos:
+            delay = 0.0
+            if prev_ts is not None and evt.timestamp > 0:
+                delay = max(0.0, evt.timestamp - prev_ts)
+                if delay > Recorder.MAX_DELAY_S:
+                    delay = Recorder.MAX_DELAY_S
+            if evt.timestamp > 0:
+                prev_ts = evt.timestamp
+
             if evt.tipo == "click":
                 n_click += 1
                 sel = None
@@ -256,12 +274,14 @@ class Recorder:
                         tipo=StepType.CLICK_CONTROL,
                         selector=sel,
                         descripcion=f"Click en {desc}",
+                        delay_before_s=delay,
                     ))
                 else:
                     pasos.append(Step(
                         tipo=StepType.CLICK_AT_XY,
                         extra={"x": evt.x, "y": evt.y},
                         descripcion=f"Click en ({evt.x},{evt.y}) — sin selector",
+                        delay_before_s=delay,
                     ))
                 if on_progress is not None:
                     on_progress(n_click, total_clicks)
@@ -270,11 +290,13 @@ class Recorder:
                     tipo=StepType.TYPE_TEXT,
                     valor=evt.valor,
                     descripcion=evt.descripcion,
+                    delay_before_s=delay,
                 ))
             elif evt.tipo == "send_keys":
                 pasos.append(Step(
                     tipo=StepType.SEND_KEYS,
                     valor=evt.valor,
                     descripcion=evt.descripcion,
+                    delay_before_s=delay,
                 ))
         return Macro(nombre="grabacion", pasos=pasos)

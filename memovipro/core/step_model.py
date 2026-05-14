@@ -48,6 +48,7 @@ class Step:
     opcional: bool = False
     descripcion: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
+    delay_before_s: float = 0.0  # segundos de espera antes de ejecutar este paso
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"tipo": self.tipo.value}
@@ -57,6 +58,8 @@ class Step:
             d["valor"] = self.valor
         if self.titulo is not None:
             d["titulo"] = self.titulo
+        if self.delay_before_s > 0:
+            d["delay_before_s"] = round(self.delay_before_s, 3)
         if self.timeout_s != 15.0:
             d["timeout_s"] = self.timeout_s
         if self.reintentos != 2:
@@ -83,6 +86,7 @@ class Step:
             opcional=bool(d.get("opcional", False)),
             descripcion=d.get("descripcion", ""),
             extra=dict(d.get("extra", {})),
+            delay_before_s=float(d.get("delay_before_s", 0.0)),
         )
 
 
@@ -204,4 +208,5 @@ def render_step(step: Step, ctx: dict[str, str]) -> Step:
         opcional=step.opcional,
         descripcion=step.descripcion,
         extra={k: render_placeholders(v, ctx) if isinstance(v, str) else v for k, v in step.extra.items()},
+        delay_before_s=step.delay_before_s,
     )

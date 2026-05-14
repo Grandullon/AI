@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .incidents_view import IncidentsView
+from .replay_panel import ReplayPanel
 from .run_panel import RunPanel
 from .schedule_panel import SchedulePanel
 from .step_editor import StepEditor
@@ -87,17 +88,18 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         self.step_editor = StepEditor(macros_dir=self.macros_dir)
+        self.replay_panel = ReplayPanel(macros_dir=self.macros_dir, data_dir=self.data_dir)
         self.run_panel = RunPanel(
             macros_dir=self.macros_dir,
             data_dir=self.data_dir,
             on_finished=self._on_run_finished,
         )
         self.incidents_view = IncidentsView(data_dir=self.data_dir)
-
         self.schedule_panel = SchedulePanel(macros_dir=self.macros_dir, data_dir=self.data_dir)
 
         self.tabs.addTab(self.step_editor, "Macros")
-        self.tabs.addTab(self.run_panel, "Ejecutar")
+        self.tabs.addTab(self.replay_panel, "Reproducir")
+        self.tabs.addTab(self.run_panel, "Ejecutar (por DNI)")
         self.tabs.addTab(self.schedule_panel, "Programación")
         self.tabs.addTab(self.incidents_view, "Incidencias")
         layout.addWidget(self.tabs)
@@ -117,4 +119,5 @@ class MainWindow(QMainWindow):
 
     def _panic(self):
         self.run_panel.abort()
+        self.replay_panel.abort()
         self.statusBar().showMessage("⏹  Ejecución abortada por el usuario (panic key)")
