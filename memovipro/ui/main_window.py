@@ -19,26 +19,56 @@ from .schedule_panel import SchedulePanel
 from .step_editor import StepEditor
 
 APP_STYLE = """
-QMainWindow, QDialog { background-color: #f0f4f8; color: #2c3e50; }
-QTabWidget::pane { border: 1px solid #bdc3c7; border-radius: 4px; }
+QMainWindow, QDialog, QWidget { background-color: #f0f4f8; color: #2c3e50; }
+QTabWidget::pane { border: 1px solid #bdc3c7; border-radius: 4px; background: #f0f4f8; }
 QTabBar::tab {
-    background: #ecf0f1; padding: 8px 16px; border: 1px solid #bdc3c7;
+    background: #ecf0f1; color: #2c3e50;
+    padding: 8px 16px; border: 1px solid #bdc3c7;
     border-bottom: none; border-top-left-radius: 4px; border-top-right-radius: 4px;
 }
 QTabBar::tab:selected { background: #3498db; color: white; }
+QTabBar::tab:!selected:hover { background: #d6dbdf; }
 QPushButton {
     background-color: #3498db; color: white; border: none;
     padding: 8px 16px; font-size: 14px; border-radius: 4px;
 }
 QPushButton:hover { background-color: #2980b9; }
 QPushButton:disabled { background-color: #bdc3c7; color: #7f8c8d; }
-QLabel, QComboBox, QListWidget, QTableWidget { font-size: 14px; color: #2c3e50; }
-QLineEdit, QComboBox, QSpinBox {
-    background: white; border: 1px solid #bdc3c7; padding: 4px;
+QLabel { font-size: 14px; color: #2c3e50; background: transparent; }
+QLineEdit, QComboBox, QSpinBox, QTimeEdit, QTextEdit, QPlainTextEdit {
+    background: white; color: #2c3e50;
+    border: 1px solid #bdc3c7; padding: 4px;
     border-radius: 3px;
+    selection-background-color: #3498db; selection-color: white;
 }
-QProgressBar { border: 2px solid #3498db; border-radius: 5px; text-align: center; }
+QComboBox QAbstractItemView {
+    background: white; color: #2c3e50;
+    selection-background-color: #3498db; selection-color: white;
+}
+QTableWidget, QListWidget {
+    background-color: white; color: #2c3e50;
+    border: 1px solid #bdc3c7; gridline-color: #ecf0f1;
+    alternate-background-color: #fafbfc;
+    selection-background-color: #3498db; selection-color: white;
+}
+QTableWidget::item, QListWidget::item { color: #2c3e50; }
+QTableWidget::item:selected, QListWidget::item:selected {
+    background-color: #3498db; color: white;
+}
+QHeaderView::section {
+    background-color: #2c3e50; color: white;
+    padding: 6px; border: 1px solid #34495e; font-weight: bold;
+}
+QHeaderView { background-color: #2c3e50; }
+QProgressBar {
+    border: 2px solid #3498db; border-radius: 5px; text-align: center;
+    background: white; color: #2c3e50;
+}
 QProgressBar::chunk { background-color: #3498db; }
+QStatusBar { color: #2c3e50; background: #ecf0f1; }
+QCheckBox { color: #2c3e50; background: transparent; }
+QMessageBox { background-color: #f0f4f8; color: #2c3e50; }
+QMessageBox QLabel { color: #2c3e50; }
 """
 
 

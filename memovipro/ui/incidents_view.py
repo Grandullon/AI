@@ -43,6 +43,8 @@ class IncidentsView(QWidget):
         self.tabla = QTableWidget(0, len(HEADERS))
         self.tabla.setHorizontalHeaderLabels(HEADERS)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.tabla.setAlternatingRowColors(True)
+        self.tabla.verticalHeader().setVisible(False)
         self.tabla.cellDoubleClicked.connect(self._on_double_click)
         layout.addWidget(self.tabla, 1)
 

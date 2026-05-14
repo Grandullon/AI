@@ -130,15 +130,29 @@ class Recorder:
         self._kb_listener.start()
 
     def stop(self) -> list[EventoCrudo]:
-        """Detiene los listeners y devuelve los eventos crudos. Rápido."""
+        """Detiene los listeners y devuelve los eventos crudos.
+
+        Espera a que los hilos de pynput finalicen antes de retornar
+        (timeout 2s cada uno). Esto es importante en Windows: los
+        WH_KEYBOARD_LL / WH_MOUSE_LL siguen instalados hasta que el
+        hilo dueño termina, y mientras estén instalados los diálogos
+        nativos de Windows (file dialog, etc.) pueden congelarse.
+        """
         self._grabando = False
-        for lst in (self._mouse_listener, self._kb_listener):
-            if lst is None:
-                continue
+        listeners = [l for l in (self._mouse_listener, self._kb_listener) if l is not None]
+        for lst in listeners:
             try:
                 lst.stop()
             except Exception:
                 pass
+        for lst in listeners:
+            try:
+                if lst.is_alive():
+                    lst.join(timeout=2.0)
+            except Exception:
+                pass
+        self._mouse_listener = None
+        self._kb_listener = None
         with self._lock:
             self._flush_text(force=True)
         return list(self.eventos_crudos)

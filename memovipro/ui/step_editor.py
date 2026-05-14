@@ -61,6 +61,8 @@ class StepEditor(QWidget):
         self.tabla.setHorizontalHeaderLabels(COLS)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.tabla.setAlternatingRowColors(True)
+        self.tabla.verticalHeader().setVisible(False)
         layout.addWidget(self.tabla, 1)
 
         botones = QHBoxLayout()

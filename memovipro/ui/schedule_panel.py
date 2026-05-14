@@ -132,6 +132,8 @@ class SchedulePanel(QWidget):
         self.tabla = QTableWidget(0, 4)
         self.tabla.setHorizontalHeaderLabels(["Nombre", "Próximo", "Estado", "Acción"])
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabla.setAlternatingRowColors(True)
+        self.tabla.verticalHeader().setVisible(False)
         layout.addWidget(self.tabla, 1)
 
         fila_btns = QHBoxLayout()

@@ -174,13 +174,25 @@ class RecordDialog(QDialog):
             self._kb_listener = None
 
     def _stop_hotkey_async(self):
-        """Indica al listener que pare. No bloqueamos esperando — vivirá poco."""
-        if self._kb_listener is not None:
-            try:
-                self._kb_listener.stop()
-            except Exception:
-                pass
-            self._kb_listener = None
+        """Detiene el listener de F9 y espera (con timeout) a que termine.
+
+        Importante en Windows: hasta que el hilo de pynput no termina,
+        sus hooks de bajo nivel siguen instalados y pueden interferir
+        con QFileDialog y otros diálogos nativos.
+        """
+        if self._kb_listener is None:
+            return
+        lst = self._kb_listener
+        self._kb_listener = None
+        try:
+            lst.stop()
+        except Exception:
+            pass
+        try:
+            if lst.is_alive():
+                lst.join(timeout=1.0)
+        except Exception:
+            pass
 
     def _stop(self):
         if self._recorder is None:
