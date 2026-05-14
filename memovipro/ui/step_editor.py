@@ -191,9 +191,13 @@ class StepEditor(QWidget):
             QMessageBox.warning(self, "Error", f"No se pudo guardar: {exc}")
 
     def _launch_recorder(self):
+        from PyQt6.QtWidgets import QDialog
         dlg = RecordDialog(self)
-        dlg.macro_capturada.connect(self._on_macro_recorded)
-        dlg.show()
+        result = dlg.exec()
+        if result == QDialog.DialogCode.Accepted and dlg.macro is not None and dlg.macro.pasos:
+            self._on_macro_recorded(dlg.macro)
+        elif result == QDialog.DialogCode.Accepted:
+            QMessageBox.information(self, "Grabación", "No se capturó ningún paso.")
 
     def _on_macro_recorded(self, macro: Macro):
         if not macro or not macro.pasos:

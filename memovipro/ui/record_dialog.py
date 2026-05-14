@@ -66,8 +66,11 @@ class RecordDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Grabar macro")
-        self.setModal(False)
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        # Modal app-wide pero sin AlwaysOnTop:
+        # - Bloquea el resto de MemoviPro durante la grabación.
+        # - El usuario sigue pudiendo alt-tab a su aplicación de trabajo.
+        # - Evita que se quede oculto detrás de cualquier QMessageBox modal.
+        self.setModal(True)
         self.resize(440, 220)
 
         self.macro: Optional[Macro] = None
@@ -207,12 +210,14 @@ class RecordDialog(QDialog):
 
     def _on_macro_ready(self, macro):
         self._recorder = None
+        if macro is None:
+            macro = Macro(nombre="grabacion")
         self.macro = macro
-        if macro is not None and macro.pasos:
-            self.macro_capturada.emit(macro)
-        else:
-            self.macro_capturada.emit(Macro(nombre="grabacion"))
+        # Cerramos el diálogo (que tiene WindowStaysOnTopHint) ANTES de
+        # emitir la señal. Si el padre va a abrir un QMessageBox modal,
+        # no queremos que quede oculto detrás de este diálogo.
         self.accept()
+        self.macro_capturada.emit(self.macro)
 
     def _cancelar(self):
         self._countdown_timer.stop()
