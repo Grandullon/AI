@@ -1,30 +1,29 @@
 """Diálogo de grabación de macro.
 
 Flujo:
-1. Aparece con un countdown 3-2-1 para que el usuario cambie de ventana.
-2. Inicia el grabador (clics resueltos a selectores UI Automation y
-   tecleo agrupado, sin movimientos del ratón).
-3. El usuario puede:
-   - Volver a MemoviPro y pulsar "Detener", o
-   - Pulsar F9 estando en cualquier ventana (hotkey global).
-4. Devuelve la Macro grabada.
-
-El primer clic real del usuario sobre el botón "Grabar" no se captura
-porque el listener no se inicia hasta después del countdown.
+1. Countdown 3-2-1 para que el usuario cambie de ventana.
+2. Inicia el grabador (captura cruda y rápida; sin pywinauto durante la
+   grabación, así el usuario no nota retardo entre clics).
+3. F9 global o botón "Detener" para finalizar.
+4. La resolución de selectores (lenta) corre en un QThread aparte —
+   la GUI sigue viva mostrando "Procesando paso X/Y".
+5. Cuando termina, emite la `Macro` resultante.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
+    QProgressBar,
     QPushButton,
     QVBoxLayout,
 )
 
+from core.recorder import EventoCrudo, Recorder
 from core.step_model import Macro
 
 try:
@@ -37,21 +36,46 @@ except Exception:
 COUNTDOWN_SECS = 3
 
 
+class _ResolveWorker(QThread):
+    """Hilo que detiene el recorder y resuelve los selectores."""
+
+    progress = pyqtSignal(int, int)
+    finished_macro = pyqtSignal(object)  # Macro o None
+
+    def __init__(self, recorder: Recorder, resolver_selectores: bool = True):
+        super().__init__()
+        self.recorder = recorder
+        self.resolver_selectores = resolver_selectores
+
+    def run(self):
+        try:
+            eventos = self.recorder.stop()
+            macro = Recorder.construir_macro(
+                eventos,
+                resolver_selectores=self.resolver_selectores,
+                on_progress=lambda i, total: self.progress.emit(i, total),
+            )
+        except Exception:
+            macro = None
+        self.finished_macro.emit(macro)
+
+
 class RecordDialog(QDialog):
     macro_capturada = pyqtSignal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Grabar macro")
-        self.setModal(False)  # no modal: el usuario tiene que poder cambiar a otra app
+        self.setModal(False)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        self.resize(420, 200)
+        self.resize(440, 220)
 
         self.macro: Optional[Macro] = None
-        self._recorder = None
+        self._recorder: Optional[Recorder] = None
         self._kb_listener = None
         self._countdown_left = COUNTDOWN_SECS
         self._counter_steps = 0
+        self._worker: Optional[_ResolveWorker] = None
 
         layout = QVBoxLayout(self)
         self.estado = QLabel(f"La grabación empezará en {COUNTDOWN_SECS}…")
@@ -66,13 +90,16 @@ class RecordDialog(QDialog):
 
         self.ayuda = QLabel(
             "Cambia ahora a tu aplicación.\n"
-            "Pulsa <b>F9</b> en cualquier ventana o el botón <b>Detener</b> "
-            "para finalizar."
+            "Pulsa <b>F9</b> en cualquier ventana o el botón <b>Detener</b> para finalizar."
         )
         self.ayuda.setTextFormat(Qt.TextFormat.RichText)
         self.ayuda.setWordWrap(True)
         self.ayuda.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.ayuda)
+
+        self.progress = QProgressBar()
+        self.progress.setVisible(False)
+        layout.addWidget(self.progress)
 
         btns = QHBoxLayout()
         btns.addStretch()
@@ -104,7 +131,6 @@ class RecordDialog(QDialog):
         self._iniciar_grabacion()
 
     def _iniciar_grabacion(self):
-        from core.recorder import Recorder
         self._recorder = Recorder()
         try:
             self._recorder.start()
@@ -132,17 +158,20 @@ class RecordDialog(QDialog):
         def on_press(key):
             try:
                 if key == _pynput_keyboard.Key.f9:
-                    # llamada al método de Qt thread-safe vía señal
                     QTimer.singleShot(0, self._stop)
-                    return False  # detener listener
+                    return False
             except Exception:
                 return
             return None
 
-        self._kb_listener = _pynput_keyboard.Listener(on_press=on_press)
-        self._kb_listener.start()
+        try:
+            self._kb_listener = _pynput_keyboard.Listener(on_press=on_press)
+            self._kb_listener.start()
+        except Exception:
+            self._kb_listener = None
 
-    def _stop_hotkey(self):
+    def _stop_hotkey_async(self):
+        """Indica al listener que pare. No bloqueamos esperando — vivirá poco."""
         if self._kb_listener is not None:
             try:
                 self._kb_listener.stop()
@@ -154,21 +183,45 @@ class RecordDialog(QDialog):
         if self._recorder is None:
             self._cancelar()
             return
+        # Cambiamos la UI a estado "procesando" inmediatamente.
         self._update_timer.stop()
-        self._stop_hotkey()
-        try:
-            self.macro = self._recorder.stop()
-        except Exception as exc:
-            self.estado.setText(f"Error al detener: {exc}")
-            return
+        self._stop_hotkey_async()
+        self.estado.setText("⏳ Procesando selectores…")
+        self.estado.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50;")
+        self.btn_detener.setEnabled(False)
+        self.btn_cancelar.setText("Cerrar sin procesar")
+        self.progress.setVisible(True)
+        self.progress.setRange(0, 0)  # indeterminado hasta que llegue el primer progreso
+
+        # La parte lenta corre en un hilo aparte para no bloquear la GUI.
+        self._worker = _ResolveWorker(self._recorder, resolver_selectores=True)
+        self._worker.progress.connect(self._on_progress)
+        self._worker.finished_macro.connect(self._on_macro_ready)
+        self._worker.start()
+
+    def _on_progress(self, i: int, total: int):
+        if total > 0:
+            self.progress.setRange(0, total)
+            self.progress.setValue(i)
+            self.estado.setText(f"⏳ Resolviendo selector {i}/{total}…")
+
+    def _on_macro_ready(self, macro):
         self._recorder = None
-        self.macro_capturada.emit(self.macro)
+        self.macro = macro
+        if macro is not None and macro.pasos:
+            self.macro_capturada.emit(macro)
+        else:
+            self.macro_capturada.emit(Macro(nombre="grabacion"))
         self.accept()
 
     def _cancelar(self):
         self._countdown_timer.stop()
         self._update_timer.stop()
-        self._stop_hotkey()
+        self._stop_hotkey_async()
+        if self._worker is not None and self._worker.isRunning():
+            # Si el worker está corriendo, dejamos que termine; cerramos diálogo.
+            self.reject()
+            return
         if self._recorder is not None:
             try:
                 self._recorder.stop()
