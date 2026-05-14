@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 from core.step_model import Macro, SalidaConfig, Selector, Step, StepType
 
 from .inspector import CapturaSelector, Inspector
+from .record_dialog import RecordDialog
 
 
 COLS = ["#", "Tipo", "Selector", "Valor / Título", "Timeout (s)", "Opc.", "Descripción"]
@@ -63,17 +64,21 @@ class StepEditor(QWidget):
         layout.addWidget(self.tabla, 1)
 
         botones = QHBoxLayout()
-        for txt, slot in [
-            ("Añadir paso", self._add_step),
-            ("Editar valor", self._edit_value),
-            ("Eliminar", self._remove_step),
-            ("Subir", lambda: self._move(-1)),
-            ("Bajar", lambda: self._move(1)),
-            ("Inspector", self._launch_inspector),
-            ("Cargar YAML", self._load),
-            ("Guardar YAML", self._save),
-        ]:
+        botones_def = [
+            ("🔴 Grabar", self._launch_recorder, "#c0392b"),
+            ("Añadir paso", self._add_step, None),
+            ("Editar valor", self._edit_value, None),
+            ("Eliminar", self._remove_step, None),
+            ("Subir", lambda: self._move(-1), None),
+            ("Bajar", lambda: self._move(1), None),
+            ("Inspector", self._launch_inspector, None),
+            ("Cargar YAML", self._load, None),
+            ("Guardar YAML", self._save, None),
+        ]
+        for txt, slot, color in botones_def:
             b = QPushButton(txt)
+            if color:
+                b.setStyleSheet(f"background-color: {color}; color: white; font-weight: bold;")
             b.clicked.connect(slot)
             botones.addWidget(b)
         layout.addLayout(botones)
@@ -184,6 +189,36 @@ class StepEditor(QWidget):
             QMessageBox.information(self, "Guardado", f"Macro guardada en {path}")
         except Exception as exc:
             QMessageBox.warning(self, "Error", f"No se pudo guardar: {exc}")
+
+    def _launch_recorder(self):
+        dlg = RecordDialog(self)
+        dlg.macro_capturada.connect(self._on_macro_recorded)
+        dlg.show()
+
+    def _on_macro_recorded(self, macro: Macro):
+        if not macro or not macro.pasos:
+            QMessageBox.information(self, "Grabación", "No se capturó ningún paso.")
+            return
+        n = len(macro.pasos)
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Grabación completada")
+        msg.setText(
+            f"Se han capturado {n} pasos nuevos.\n"
+            f"La macro actual tiene {len(self.macro.pasos)} pasos."
+        )
+        msg.setInformativeText("¿Qué quieres hacer con los pasos grabados?")
+        b_anadir = msg.addButton("Añadir al final", QMessageBox.ButtonRole.AcceptRole)
+        b_remplazar = msg.addButton("Reemplazar todo", QMessageBox.ButtonRole.DestructiveRole)
+        msg.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
+        msg.exec()
+        clicked = msg.clickedButton()
+        if clicked is b_anadir:
+            self.macro.pasos.extend(macro.pasos)
+        elif clicked is b_remplazar:
+            self.macro.pasos = list(macro.pasos)
+        else:
+            return
+        self._refresh_table()
 
     def _launch_inspector(self):
         QMessageBox.information(

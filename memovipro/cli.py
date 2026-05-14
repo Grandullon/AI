@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT))
 
 from loguru import logger
 
+from core.bootstrap import ensure_runtime_folders
 from core.log_config import setup_logging
 from core.notifier import SmtpConfig
 from core.runner import MacroRunner
@@ -97,8 +98,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--logs-dir", default=str(ROOT / "logs"), help="Carpeta de logs")
     args = parser.parse_args(argv)
 
+    info = ensure_runtime_folders(ROOT)
     setup_logging(args.logs_dir)
     logger.info("=== MemoviPro CLI ===")
+    logger.debug("Bootstrap: {}", info)
     logger.info("macro={} excel={} dry_run={} all={}", args.macro, args.excel, args.dry_run, args.all)
 
     macros_dir = Path(args.macros_dir)
