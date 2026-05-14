@@ -4,8 +4,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Permitir importar `core.*` y `ui.*` cuando se ejecuta `python app.py`
-ROOT = Path(__file__).resolve().parent
+# Cuando se ejecuta como script .py: ROOT es la carpeta del repo.
+# Cuando se ejecuta como .exe (PyInstaller): ROOT es la carpeta del .exe,
+# para que data/, logs/, macros/ se creen junto al ejecutable y no en el
+# directorio temporal _MEI*.
+if getattr(sys, "frozen", False):
+    ROOT = Path(sys.executable).resolve().parent
+else:
+    ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from PyQt6.QtWidgets import QApplication

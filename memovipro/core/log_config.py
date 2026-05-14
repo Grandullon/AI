@@ -26,12 +26,13 @@ def setup_logging(log_dir: str | Path = "logs", level: str | None = None) -> Non
     nivel = level or os.environ.get("MEMOVIPRO_LOG_LEVEL", "INFO")
 
     logger.remove()
-    logger.add(
-        sys.stderr,
-        level=nivel,
-        format="<green>{time:HH:mm:ss}</green> <level>{level: <7}</level> <cyan>{name}:{line}</cyan> {message}",
-        colorize=True,
-    )
+    if sys.stderr is not None:
+        logger.add(
+            sys.stderr,
+            level=nivel,
+            format="<green>{time:HH:mm:ss}</green> <level>{level: <7}</level> <cyan>{name}:{line}</cyan> {message}",
+            colorize=True,
+        )
     logger.add(
         log_dir / "run_{time:YYYYMMDD}.log",
         rotation="00:00",

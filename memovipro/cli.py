@@ -17,7 +17,10 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+if getattr(sys, "frozen", False):
+    ROOT = Path(sys.executable).resolve().parent
+else:
+    ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from loguru import logger
@@ -51,7 +54,37 @@ def _resolver_macro(nombre_o_ruta: str, macros_dir: Path) -> Path:
     )
 
 
+def _ayuda_interactiva() -> int:
+    print("=" * 60)
+    print(" MemoviPro CLI · memovipro-run.exe")
+    print("=" * 60)
+    print()
+    print("Este ejecutable necesita argumentos. Llámalo desde una")
+    print("consola, desde Task Scheduler, o desde RunMacro.ps1:")
+    print()
+    print("  memovipro-run.exe --macro NOMBRE --excel D:\\datos\\dnis.xlsx")
+    print()
+    print("Opciones:")
+    print("  --macro NOMBRE      Macro a ejecutar (sin .yaml o ruta completa)")
+    print("  --excel RUTA        Excel/CSV con la columna DNI")
+    print("  --dry-run           Simulación: resalta los controles, no clica")
+    print("  --all               Ignorar checkpoint y procesar todos los DNIs")
+    print("  --no-retry          No reintentar KO al final")
+    print("  --no-notify         No enviar email aunque esté configurado")
+    print()
+    print("Códigos de salida: 0=OK · 2=KO parcial · 1=error fatal")
+    print()
+    try:
+        input("Pulsa Enter para salir...")
+    except EOFError:
+        pass
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    if argv is None and len(sys.argv) == 1 and getattr(sys, "frozen", False):
+        return _ayuda_interactiva()
+
     parser = argparse.ArgumentParser(prog="memovipro-run", description="Ejecuta una macro MemoviPro sin GUI.")
     parser.add_argument("--macro", required=True, help="Nombre de la macro (sin extensión) o ruta al YAML")
     parser.add_argument("--excel", required=True, help="Excel/CSV con la columna DNI")
