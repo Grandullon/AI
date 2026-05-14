@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 
 from .incidents_view import IncidentsView
 from .run_panel import RunPanel
+from .schedule_panel import SchedulePanel
 from .step_editor import StepEditor
 
 APP_STYLE = """
@@ -63,8 +64,11 @@ class MainWindow(QMainWindow):
         )
         self.incidents_view = IncidentsView(data_dir=self.data_dir)
 
+        self.schedule_panel = SchedulePanel(macros_dir=self.macros_dir, data_dir=self.data_dir)
+
         self.tabs.addTab(self.step_editor, "Macros")
         self.tabs.addTab(self.run_panel, "Ejecutar")
+        self.tabs.addTab(self.schedule_panel, "Programación")
         self.tabs.addTab(self.incidents_view, "Incidencias")
         layout.addWidget(self.tabs)
 

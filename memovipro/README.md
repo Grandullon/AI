@@ -35,8 +35,16 @@ botones.
   rellena el `selector` (nombre/AutomationId/ClassName) del paso seleccionado.
 - **Logs estructurados** en `logs/run_YYYYMMDD.log` con rotación diaria y
   retención de 30 días (loguru).
-- GUI PyQt6 con 3 pestañas: editor de macros, panel de ejecución, visor de
-  incidencias.
+- **CLI sin GUI** (`cli.py`) con códigos de salida (0=OK, 2=KO parcial,
+  1=error fatal) para invocar desde scripts o Task Scheduler.
+- **Programación con Task Scheduler de Windows** desde la propia GUI:
+  diaria, semanal o al iniciar sesión.
+- **Empaquetado en `.exe`** con PyInstaller (`memovipro-run.exe` para CLI y
+  `memovipro-gui.exe` para la GUI).
+- **Wrapper PowerShell** (`RunMacro.ps1`) que captura excepciones y deja
+  transcript diario.
+- GUI PyQt6 con 4 pestañas: editor de macros, panel de ejecución,
+  programación de tareas, visor de incidencias.
 - Hotkey de pánico `Ctrl+Alt+Esc` para abortar instantáneamente.
 
 ## Estructura
@@ -130,3 +138,56 @@ python tools/migrar_legacy.py ruta/legacy.json macros/migrada.yaml
 Los clics se importan como `click_at_xy` (frágiles). **Revisión manual obligatoria**
 para sustituirlos por `click_control` con selectores simbólicos antes de
 usarlos en producción.
+
+## Ejecución desatendida y programación
+
+### Restricción importante
+
+Como MemoviPro simula ratón y teclado, las tareas **necesitan una sesión
+Windows iniciada** (no se pueden correr como servicio en background). Lo
+recomendado es dejar el PC con tu usuario conectado y bloquear la sesión
+si quieres.
+
+### CLI
+
+```cmd
+python cli.py --macro descarga_it --excel D:\datos\dnis.xlsx
+python cli.py --macro descarga_it --excel D:\datos\dnis.xlsx --dry-run
+python cli.py --macro descarga_it --excel D:\datos\dnis.xlsx --all --no-notify
+```
+
+Códigos de salida: `0`=todo OK · `2`=terminó con DNIs KO · `1`=error fatal.
+
+### Empaquetar como .exe
+
+```cmd
+pip install pyinstaller
+pyinstaller memovipro-run.spec --clean   # → dist\memovipro-run.exe (sin GUI)
+pyinstaller memovipro-gui.spec --clean   # → dist\memovipro-gui.exe (con GUI)
+```
+
+### Programar la ejecución
+
+**Opción A — desde la GUI** (recomendada): pestaña **Programación** →
+elige macro, Excel, frecuencia (diaria / semanal / al iniciar sesión) y
+"Programar tarea". Se crean con prefijo `MemoviPro_` y se pueden
+listar/eliminar desde la misma pestaña.
+
+**Opción B — PowerShell + Task Scheduler manual**:
+
+```powershell
+# Crear tarea diaria a las 08:00
+schtasks /Create /TN "MemoviPro_descarga_it" /SC DAILY /ST 08:00 /RL LIMITED /IT `
+  /TR "powershell.exe -ExecutionPolicy Bypass -File C:\Apps\MemoviPro\RunMacro.ps1 -Macro descarga_it -Excel D:\datos\dnis.xlsx"
+```
+
+El script `RunMacro.ps1` deja transcript en `logs\powershell_YYYYMMDD.log` y
+propaga el exit code del CLI.
+
+### Resumen del flujo recomendado en producción
+
+1. Diseñas la macro con la GUI (Inspector + dry-run para validar).
+2. Empaquetas el ejecutable: `pyinstaller memovipro-run.spec --clean`.
+3. Programas con la pestaña **Programación** apuntando al `.exe`.
+4. Cada mañana revisas los emails de resumen y la pestaña **Incidencias**
+   para los DNIs marcados en rojo (con su screenshot del popup).
