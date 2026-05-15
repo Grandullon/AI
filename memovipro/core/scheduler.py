@@ -65,6 +65,18 @@ def _correr(cmd: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
 
 
+def _auto_detect_run_exe() -> Path | None:
+    """Si estamos corriendo como .exe empaquetado, busca memovipro-run.exe
+    junto al ejecutable actual."""
+    if not getattr(sys, "frozen", False):
+        return None
+    gui_exe = Path(sys.executable).resolve()
+    candidato = gui_exe.parent / "memovipro-run.exe"
+    if candidato.exists():
+        return candidato
+    return None
+
+
 def construir_accion(
     args: list[str],
     ejecutable: str | Path | None = None,
@@ -72,19 +84,35 @@ def construir_accion(
     """Devuelve (programa, argumentos) listos para schtasks /TR.
 
     `args` es la lista de argumentos CLI ya preparada por el caller.
-    Por ejemplo:
-        ["--macro", "pa-activo", "--excel", "C:/dnis.xlsx"]
-        ["--replay", "pa-activo", "--veces", "100"]
-        ["--pipeline", "rutina_diaria"]
 
-    Si `ejecutable` apunta a un .exe lo usa directamente. Si no, usa
-    `python cli.py` desde la raíz del proyecto.
+    Resolución del programa a ejecutar:
+      1. Si se pasa `ejecutable`, se usa esa ruta.
+      2. Si estamos en modo congelado (.exe via PyInstaller), buscamos
+         memovipro-run.exe junto a sys.executable. Si está, lo usamos.
+         Si no, lanzamos error — sys.executable + cli.py no funciona
+         desde un .exe porque cli.py vive en una carpeta temporal que
+         se borra al cerrar.
+      3. En desarrollo (python app.py), usamos sys.executable + cli.py.
     """
     if ejecutable:
         exe = Path(ejecutable).resolve()
         if not exe.exists():
             raise FileNotFoundError(f"Ejecutable no encontrado: {exe}")
         return str(exe), subprocess.list2cmdline(args)
+
+    auto = _auto_detect_run_exe()
+    if auto is not None:
+        return str(auto), subprocess.list2cmdline(args)
+
+    if getattr(sys, "frozen", False):
+        raise RuntimeError(
+            "Para programar tareas necesitas tener 'memovipro-run.exe' "
+            "junto a 'memovipro-gui.exe'. Descarga el artefacto "
+            "'memovipro-paquete-completo' (que incluye ambos) o indica "
+            "la ruta de memovipro-run.exe en el campo '.exe' del panel."
+        )
+
+    # Modo desarrollo: python cli.py
     py = Path(sys.executable).resolve()
     cli = Path(__file__).resolve().parents[1] / "cli.py"
     return str(py), subprocess.list2cmdline([str(cli), *args])
@@ -130,6 +158,22 @@ def eliminar_tarea(nombre: str) -> bool:
     return res.returncode == 0
 
 
+def _detectar_delimiter(text: str) -> str:
+    """Decide si el CSV usa coma o punto y coma.
+
+    schtasks en Windows español emite CSV con ';' por defecto (porque el
+    coma es separador decimal en es-ES). En inglés usa ','. Lo detectamos
+    contando ocurrencias en la primera línea no vacía.
+    """
+    for linea in text.splitlines():
+        if not linea.strip():
+            continue
+        if linea.count(";") > linea.count(","):
+            return ";"
+        return ","
+    return ","
+
+
 def listar_tareas() -> list[TareaProgramada]:
     """Devuelve solo las tareas creadas por MemoviPro (prefijo MemoviPro_)."""
     if not _es_windows():
@@ -142,9 +186,12 @@ def listar_tareas() -> list[TareaProgramada]:
     out: list[TareaProgramada] = []
     import csv
     from io import StringIO
-    reader = csv.reader(StringIO(res.stdout))
+
+    delim = _detectar_delimiter(res.stdout)
+    logger.debug("schtasks CSV delimiter detectado: {}", repr(delim))
+    reader = csv.reader(StringIO(res.stdout), delimiter=delim)
     for fila in reader:
-        if len(fila) < 4:
+        if len(fila) < 2:
             continue
         nombre = fila[0].strip('"').strip()
         if not nombre.lstrip("\\").startswith(PREFIX) and PREFIX not in nombre:

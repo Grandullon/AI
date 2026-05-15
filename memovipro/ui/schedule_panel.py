@@ -41,6 +41,8 @@ from PyQt6.QtWidgets import (
 
 from core.scheduler import (
     Frecuencia,
+    _auto_detect_run_exe,
+    construir_accion,
     crear_tarea,
     eliminar_tarea,
     listar_tareas,
@@ -188,13 +190,33 @@ class SchedulePanel(QWidget):
 
         fila_exe = QHBoxLayout()
         self.exe_path = QLineEdit()
-        self.exe_path.setPlaceholderText("Opcional: ruta a memovipro-run.exe (si vacío, usa python cli.py)")
+        # Auto-detectar memovipro-run.exe si estamos congelados.
+        auto_exe = _auto_detect_run_exe()
+        if auto_exe is not None:
+            self.exe_path.setText(str(auto_exe))
+            self.exe_path.setPlaceholderText("Detectado automáticamente")
+        else:
+            self.exe_path.setPlaceholderText(
+                "Ruta a memovipro-run.exe (en desarrollo se usa python cli.py)"
+            )
         browse_exe = QPushButton("Examinar…")
         browse_exe.clicked.connect(self._browse_exe)
         fila_exe.addWidget(QLabel(".exe:"))
         fila_exe.addWidget(self.exe_path, 1)
         fila_exe.addWidget(browse_exe)
         layout.addLayout(fila_exe)
+
+        # Vista previa del comando que se programará
+        self.preview_label = QLabel(
+            "<i>Selecciona los campos y verás aquí el comando exacto que "
+            "ejecutará Task Scheduler.</i>"
+        )
+        self.preview_label.setWordWrap(True)
+        self.preview_label.setStyleSheet(
+            "background:#1e272e; color:#ecf0f1; padding:6px; "
+            "font-family:Consolas, monospace; font-size:11px;"
+        )
+        layout.addWidget(self.preview_label)
 
         fila_flags = QHBoxLayout()
         self.flag_no_notify = QCheckBox("--no-notify")
@@ -229,9 +251,23 @@ class SchedulePanel(QWidget):
         fila_btns.addStretch()
         layout.addLayout(fila_btns)
 
+        # Refrescar previsualización al cambiar cualquier campo relevante.
+        self.modo_combo.currentIndexChanged.connect(self._update_preview)
+        self.macro_combo_replay.currentIndexChanged.connect(self._update_preview)
+        self.macro_combo_dni.currentIndexChanged.connect(self._update_preview)
+        self.pipeline_combo.currentIndexChanged.connect(self._update_preview)
+        self.veces_spin.valueChanged.connect(self._update_preview)
+        self.velocidad_combo.currentIndexChanged.connect(self._update_preview)
+        self.excel_path.textChanged.connect(self._update_preview)
+        self.exe_path.textChanged.connect(self._update_preview)
+        self.flag_no_notify.stateChanged.connect(self._update_preview)
+        self.flag_no_retry.stateChanged.connect(self._update_preview)
+        self.flag_all.stateChanged.connect(self._update_preview)
+
         self._refresh_macros_y_pipelines()
         self.refresh_tareas()
         self._on_modo_changed()
+        self._update_preview()
 
     # ---- helpers ----
     def _refresh_macros_y_pipelines(self):
@@ -276,6 +312,65 @@ class SchedulePanel(QWidget):
             self.exe_path.setText(path)
 
     # ---- construir args CLI según el modo elegido ----
+    def _args_silencioso(self) -> list[str] | None:
+        """Como _args_para_modo_actual pero sin mostrar diálogos.
+
+        Útil para la previsualización en vivo: si faltan campos, devuelve
+        None silenciosamente y la previsualización dirá "campos pendientes".
+        """
+        modo = self.modo_combo.currentData()
+        if modo == MODO_REPLAY:
+            macro = self.macro_combo_replay.currentText().strip()
+            if not macro:
+                return None
+            veces = self.veces_spin.value()
+            velocidad = VELOCIDADES[self.velocidad_combo.currentIndex()][1]
+            args = ["--replay", macro, "--veces", str(veces), "--velocidad", str(velocidad)]
+            if self.flag_no_notify.isChecked():
+                args.append("--no-notify")
+            return args
+        if modo == MODO_PIPELINE:
+            pipeline = self.pipeline_combo.currentText().strip()
+            if not pipeline:
+                return None
+            args = ["--pipeline", pipeline]
+            if self.flag_no_notify.isChecked():
+                args.append("--no-notify")
+            return args
+        if modo == MODO_DNI:
+            macro = self.macro_combo_dni.currentText().strip()
+            excel = self.excel_path.text().strip()
+            if not macro or not excel:
+                return None
+            args = ["--macro", macro, "--excel", excel]
+            if self.flag_no_retry.isChecked():
+                args.append("--no-retry")
+            if self.flag_no_notify.isChecked():
+                args.append("--no-notify")
+            if self.flag_all.isChecked():
+                args.append("--all")
+            return args
+        return None
+
+    def _update_preview(self):
+        args = self._args_silencioso()
+        if args is None:
+            self.preview_label.setText(
+                "<i style='color:#e67e22'>Faltan campos por rellenar. Cuando los "
+                "completes verás aquí el comando final.</i>"
+            )
+            return
+        try:
+            programa, cmdline = construir_accion(args, self.exe_path.text().strip() or None)
+        except (FileNotFoundError, RuntimeError) as exc:
+            self.preview_label.setText(
+                f"<span style='color:#e74c3c'>⚠ {exc}</span>"
+            )
+            return
+        self.preview_label.setText(
+            f"<b>Programa:</b> {programa}<br><b>Args:</b> {cmdline}"
+        )
+
     def _args_para_modo_actual(self) -> list[str] | None:
         modo = self.modo_combo.currentData()
         if modo == MODO_REPLAY:
@@ -339,6 +434,12 @@ class SchedulePanel(QWidget):
         else:
             freq = Frecuencia(al_iniciar_sesion=True)
 
+        try:
+            programa, cmdline = construir_accion(args, self.exe_path.text().strip() or None)
+        except (FileNotFoundError, RuntimeError) as exc:
+            QMessageBox.warning(self, "Error", str(exc))
+            return
+
         ok = crear_tarea(
             nombre=nombre,
             args=args,
@@ -348,7 +449,8 @@ class SchedulePanel(QWidget):
         if ok:
             QMessageBox.information(
                 self, "Tarea creada",
-                f"Programada: MemoviPro_{nombre}\n\nComando:\n{' '.join(args)}",
+                f"Programada: MemoviPro_{nombre}\n\n"
+                f"Programa: {programa}\nArgs: {cmdline}",
             )
             self.refresh_tareas()
         else:
