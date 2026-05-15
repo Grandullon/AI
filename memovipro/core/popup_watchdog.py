@@ -24,7 +24,32 @@ class PopupEvent:
     handle: int | None = None
 
 
+_KEYWORDS_ERROR = (
+    "error", "aviso", "atención", "atencion", "advertencia",
+    "confirmar", "confirmación", "confirmacion",
+    "warning", "alert", "información", "informacion",
+    "fallo", "incidencia", "excepción", "excepcion",
+)
+
+_DIALOG_CLASSES = {"#32770", "Dialog", "TaskDialogWindowClass"}
+
+
 def _es_popup_candidato(win, ignorar: list[str]) -> bool:
+    """Decide si una ventana es probablemente un popup de error.
+
+    Estrategia conservadora — preferimos NO marcar algo como popup que
+    marcarlo erróneamente y cerrar la ventana real de la app.
+
+    Una ventana cuenta como popup si cumple AL MENOS UNO de:
+      a) Su clase es de diálogo nativo de Windows (#32770, Dialog, ...).
+      b) Su título contiene una palabra típica de error
+         ("Error", "Aviso", "Confirmar"...) Y es pequeña (<800×600).
+
+    Se ignoran:
+      - Ventanas no visibles.
+      - Ventanas sin título.
+      - Cualquier título que coincida con `ignorar`.
+    """
     try:
         if not win.is_visible():
             return False
@@ -33,17 +58,21 @@ def _es_popup_candidato(win, ignorar: list[str]) -> bool:
             return False
         if any(pat.lower() in title.lower() for pat in ignorar):
             return False
-        class_name = win.class_name() or ""
-        if class_name in {"#32770", "Dialog", "TaskDialogWindowClass"}:
+        class_name = (win.class_name() or "").strip()
+
+        if class_name in _DIALOG_CLASSES:
             return True
-        try:
-            buttons = win.descendants(control_type="Button")
-            names = {(b.window_text() or "").strip().lower() for b in buttons}
-            ok_hits = {"aceptar", "ok", "cerrar", "cancelar", "sí", "si", "no", "yes"}
-            if ok_hits & names:
-                return True
-        except Exception:
-            pass
+
+        title_lower = title.lower()
+        if any(kw in title_lower for kw in _KEYWORDS_ERROR):
+            try:
+                r = win.rectangle()
+                w_size = r.width()
+                h_size = r.height()
+                if w_size > 0 and h_size > 0 and w_size < 800 and h_size < 600:
+                    return True
+            except Exception:
+                pass
         return False
     except Exception:
         return False

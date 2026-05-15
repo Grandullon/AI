@@ -220,6 +220,14 @@ class Player:
         win.set_focus()
 
     def _resolve_control(self, paso: Step):
+        """Resuelve el control objetivo por selector simbólico.
+
+        Solo se llama cuando hay `ventana_principal` configurada en la
+        macro. Sin ventana de referencia, la API de pywinauto no es
+        fiable (Desktop().windows() devuelve UIAWrapper sin
+        child_window), así que en ese caso usamos directamente las
+        coordenadas (`fallback_xy`) en `_click_control`.
+        """
         sel = paso.selector
         if sel is None or sel.is_empty():
             raise ValueError("Paso click_control sin selector")
@@ -234,53 +242,68 @@ class Player:
         if sel.class_name:
             kwargs["class_name"] = sel.class_name
 
+        desktop = Desktop(backend="uia")
+
         if self.macro.ventana_principal:
-            win = self._focus_window(self.macro.ventana_principal)
-            ctrl = win.child_window(**kwargs)
+            win_spec = desktop.window(title_re=f".*{self.macro.ventana_principal}.*")
+            ctrl = win_spec.child_window(**kwargs)
             ctrl.wait("visible enabled", timeout=paso.timeout_s)
             return ctrl
 
-        # Sin ventana_principal: iterar ventanas top-level visibles
-        # (Desktop() no tiene child_window directamente). Cogemos el primer
-        # match. Heurística: probar primero la ventana en foreground.
-        desktop = Desktop(backend="uia")
-        ventanas = []
-        try:
-            for w in desktop.windows():
-                try:
-                    if w.is_visible():
-                        ventanas.append(w)
-                except Exception:
-                    continue
-        except Exception:
-            pass
-
+        # Sin ventana_principal: iterar y pasar handle a Desktop().window()
+        # para obtener un WindowSpecification válido (que sí tiene child_window).
         last_err: Exception | None = None
-        for w in ventanas:
+        for w in desktop.windows():
             try:
-                ctrl = w.child_window(**kwargs)
-                if ctrl.exists(timeout=0.2):
+                if not w.is_visible():
+                    continue
+                handle = w.handle
+            except Exception:
+                continue
+            try:
+                spec = desktop.window(handle=handle)
+                ctrl = spec.child_window(**kwargs)
+                if ctrl.exists(timeout=0.3):
                     try:
-                        ctrl.wait("visible enabled", timeout=min(paso.timeout_s, 5.0))
+                        ctrl.wait("visible enabled", timeout=min(paso.timeout_s, 3.0))
                     except Exception:
                         pass
                     return ctrl
             except Exception as exc:
                 last_err = exc
                 continue
-        raise RuntimeError(f"No se encontró control {kwargs} en ninguna ventana visible: {last_err}")
+        raise RuntimeError(f"No se encontró control {kwargs}: {last_err}")
 
     def _click_control(self, paso: Step) -> None:
+        """Hace clic respetando una jerarquía de estrategias:
+
+        1. Si la macro tiene `ventana_principal`: probar resolución
+           simbólica (más robusta a cambios de posición/tamaño).
+        2. Si no, o si la resolución falla, ir a `fallback_xy` (las
+           coordenadas exactas que se grabaron).
+        3. Si no hay ni una cosa ni la otra, lanzar excepción.
+        """
+        sel = paso.selector
+        fallback = paso.extra.get("fallback_xy") if paso.extra else None
+
+        # Sin ventana_principal: ir directo a coordenadas si las tenemos.
+        # Es más rápido y fiable que iterar todas las ventanas con UIA.
+        if not self.macro.ventana_principal and fallback and len(fallback) == 2:
+            x, y = int(fallback[0]), int(fallback[1])
+            if self.dry_run:
+                logger.info("[dry-run] click_at_xy → ({}, {})", x, y)
+                time.sleep(0.2)
+                return
+            self._click_xy(x, y)
+            return
+
+        # Caso normal: hay ventana_principal o no hay fallback. Resolver selector.
         try:
             ctrl = self._resolve_control(paso)
         except Exception as exc:
-            # Fallback: usar las coordenadas originales capturadas durante la grabación.
-            fallback = paso.extra.get("fallback_xy") if paso.extra else None
             if fallback and len(fallback) == 2:
                 x, y = int(fallback[0]), int(fallback[1])
-                logger.warning(
-                    "Selector no resuelto, fallback a click_at_xy ({},{}): {}", x, y, exc,
-                )
+                logger.warning("Selector no resuelto, fallback a ({},{}): {}", x, y, exc)
                 if self.dry_run:
                     logger.info("[dry-run] click_at_xy fallback → ({}, {})", x, y)
                     time.sleep(0.2)
