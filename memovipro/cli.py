@@ -23,6 +23,29 @@ else:
     ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+
+def _ocultar_consola_si_quiet() -> None:
+    """Oculta la ventana de consola en Windows si --quiet está en argv.
+
+    Tiene que llamarse lo ANTES posible para evitar el flash de la
+    consola al arrancar desde Task Scheduler. Si no es Windows o no
+    hay consola, es no-op.
+    """
+    if "--quiet" not in sys.argv:
+        return
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
+    except Exception:
+        pass
+
+
+_ocultar_consola_si_quiet()
+
 from loguru import logger
 
 from core.bootstrap import ensure_runtime_folders
@@ -98,6 +121,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="Simulación: resalta sin clicar")
     parser.add_argument("--no-retry", action="store_true", help="No reintentar KO al final (--macro)")
     parser.add_argument("--no-notify", action="store_true", help="No enviar email aunque esté configurado")
+    parser.add_argument(
+        "--quiet", action="store_true",
+        help="Oculta la ventana de consola al iniciar (Windows). Para tareas programadas.",
+    )
     parser.add_argument("--data-dir", default=str(ROOT / "data"), help="Carpeta de incidencias/checkpoints")
     parser.add_argument("--macros-dir", default=str(ROOT / "macros"), help="Carpeta de macros")
     parser.add_argument("--pipelines-dir", default=str(ROOT / "pipelines"), help="Carpeta de pipelines")

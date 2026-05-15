@@ -319,13 +319,16 @@ class SchedulePanel(QWidget):
         None silenciosamente y la previsualización dirá "campos pendientes".
         """
         modo = self.modo_combo.currentData()
+        # `--quiet` se añade SIEMPRE en las tareas programadas: oculta la
+        # ventana de consola para que no se ponga en primer plano sobre la
+        # aplicación que estás automatizando (interceptaría los clicks).
         if modo == MODO_REPLAY:
             macro = self.macro_combo_replay.currentText().strip()
             if not macro:
                 return None
             veces = self.veces_spin.value()
             velocidad = VELOCIDADES[self.velocidad_combo.currentIndex()][1]
-            args = ["--replay", macro, "--veces", str(veces), "--velocidad", str(velocidad)]
+            args = ["--quiet", "--replay", macro, "--veces", str(veces), "--velocidad", str(velocidad)]
             if self.flag_no_notify.isChecked():
                 args.append("--no-notify")
             return args
@@ -333,7 +336,7 @@ class SchedulePanel(QWidget):
             pipeline = self.pipeline_combo.currentText().strip()
             if not pipeline:
                 return None
-            args = ["--pipeline", pipeline]
+            args = ["--quiet", "--pipeline", pipeline]
             if self.flag_no_notify.isChecked():
                 args.append("--no-notify")
             return args
@@ -342,7 +345,7 @@ class SchedulePanel(QWidget):
             excel = self.excel_path.text().strip()
             if not macro or not excel:
                 return None
-            args = ["--macro", macro, "--excel", excel]
+            args = ["--quiet", "--macro", macro, "--excel", excel]
             if self.flag_no_retry.isChecked():
                 args.append("--no-retry")
             if self.flag_no_notify.isChecked():
@@ -372,6 +375,7 @@ class SchedulePanel(QWidget):
         )
 
     def _args_para_modo_actual(self) -> list[str] | None:
+        # `--quiet` se añade siempre — ver _args_silencioso para la razón.
         modo = self.modo_combo.currentData()
         if modo == MODO_REPLAY:
             macro = self.macro_combo_replay.currentText().strip()
@@ -380,7 +384,7 @@ class SchedulePanel(QWidget):
                 return None
             veces = self.veces_spin.value()
             velocidad = VELOCIDADES[self.velocidad_combo.currentIndex()][1]
-            args = ["--replay", macro, "--veces", str(veces), "--velocidad", str(velocidad)]
+            args = ["--quiet", "--replay", macro, "--veces", str(veces), "--velocidad", str(velocidad)]
             if self.flag_no_notify.isChecked():
                 args.append("--no-notify")
             return args
@@ -389,7 +393,7 @@ class SchedulePanel(QWidget):
             if not pipeline:
                 QMessageBox.warning(self, "Falta pipeline", "Crea primero un pipeline en la pestaña Cadenas.")
                 return None
-            args = ["--pipeline", pipeline]
+            args = ["--quiet", "--pipeline", pipeline]
             if self.flag_no_notify.isChecked():
                 args.append("--no-notify")
             return args
@@ -399,7 +403,7 @@ class SchedulePanel(QWidget):
             if not macro or not excel:
                 QMessageBox.warning(self, "Faltan datos", "En modo DNI hay que indicar macro y Excel.")
                 return None
-            args = ["--macro", macro, "--excel", excel]
+            args = ["--quiet", "--macro", macro, "--excel", excel]
             if self.flag_no_retry.isChecked():
                 args.append("--no-retry")
             if self.flag_no_notify.isChecked():
