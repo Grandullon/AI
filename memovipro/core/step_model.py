@@ -23,6 +23,7 @@ class StepType(str, Enum):
     SLEEP = "sleep"
     HANDLE_LIBREOFFICE_SAVE = "handle_libreoffice_save"
     CLOSE_WINDOW = "close_window"
+    WINDOW_ENSURE = "window_ensure"  # Asegura ventana al frente + estado (max/normal/min)
 
 
 @dataclass
@@ -104,6 +105,10 @@ class Macro:
     salida: SalidaConfig = field(default_factory=SalidaConfig)
     pasos: list[Step] = field(default_factory=list)
     version: int = 1
+    # Si True y hay ventana_principal, el player se asegura antes de cada
+    # paso de que la ventana esté al frente + maximizada. Resuelve el
+    # problema de "se abrió Excel en otra posición que ayer".
+    auto_anchor: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -111,6 +116,7 @@ class Macro:
             "nombre": self.nombre,
             "descripcion": self.descripcion,
             "ventana_principal": self.ventana_principal,
+            "auto_anchor": self.auto_anchor,
             "salida": asdict(self.salida),
             "pasos": [p.to_dict() for p in self.pasos],
         }
@@ -123,6 +129,7 @@ class Macro:
             nombre=d.get("nombre", "sin_nombre"),
             descripcion=d.get("descripcion", ""),
             ventana_principal=d.get("ventana_principal", ""),
+            auto_anchor=bool(d.get("auto_anchor", True)),
             salida=SalidaConfig(**salida_raw),
             pasos=[Step.from_dict(p) for p in d.get("pasos", [])],
         )

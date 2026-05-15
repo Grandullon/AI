@@ -68,6 +68,9 @@ class Player:
         self._popup_pendiente: PopupEvent | None = None
         self._watchdog: PopupWatchdog | None = None
         self._abort = threading.Event()
+        # Cache del último anchor para no machacar UIA en cada paso.
+        self._last_anchor_ts: float = 0.0
+        self._anchor_min_interval_s: float = 0.5
 
     def abort(self) -> None:
         self._abort.set()
@@ -102,6 +105,10 @@ class Player:
         logger.info("Iniciando DNI={} · macro={} · dry_run={}", dni, self.macro.nombre, self.dry_run)
 
         try:
+            # Anchor inicial: traer la ventana objetivo al frente y maximizar.
+            if self.macro.auto_anchor and self.macro.ventana_principal:
+                self._asegurar_ventana_objetivo(force=True)
+
             for idx, paso in enumerate(self.macro.pasos):
                 if self._abort.is_set():
                     break
@@ -110,6 +117,9 @@ class Player:
                 self._esperar_delay(paso_render)
                 if self._abort.is_set():
                     break
+                # Re-anchor antes de cada paso (con throttling).
+                if self.macro.auto_anchor and self.macro.ventana_principal:
+                    self._asegurar_ventana_objetivo()
                 if self.on_status:
                     self.on_status(RunStatus(dni=dni, paso_idx=idx, descripcion=paso_render.descripcion or paso_render.tipo.value))
                 try:
@@ -208,7 +218,80 @@ class Player:
                 timeout_s=paso.timeout_s,
             )
             return
+        if tipo == StepType.WINDOW_ENSURE:
+            extra = paso.extra or {}
+            title_re = paso.titulo or self.macro.ventana_principal
+            state = str(extra.get("state", "maximized"))
+            self._asegurar_ventana_objetivo(
+                title_re=title_re, state=state, force=True, timeout_s=paso.timeout_s,
+            )
+            return
         raise ValueError(f"Tipo de paso no soportado: {tipo}")
+
+    def _asegurar_ventana_objetivo(
+        self,
+        title_re: str | None = None,
+        state: str = "maximized",
+        force: bool = False,
+        timeout_s: float = 5.0,
+    ) -> None:
+        """Asegura que la ventana objetivo está al frente y en el estado pedido.
+
+        - state: 'maximized' | 'normal' | 'minimized'
+        - Cacheamos la última llamada para no rehacer si pasaron <0.5s
+          (a no ser que `force=True`).
+        - Si la ventana no existe, log debug y seguimos (no abortamos).
+        """
+        if not _HAS_PYWINAUTO:
+            return
+        title = title_re or self.macro.ventana_principal
+        if not title:
+            return
+        ahora = time.time()
+        if not force and (ahora - self._last_anchor_ts) < self._anchor_min_interval_s:
+            return
+        if self.dry_run:
+            logger.info("[dry-run] window_ensure '{}' state={}", title, state)
+            self._last_anchor_ts = ahora
+            return
+        try:
+            win = Desktop(backend="uia").window(title_re=f".*{title}.*")
+            try:
+                if not win.exists(timeout=min(timeout_s, 1.0)):
+                    logger.debug("Anchor: ventana '{}' no encontrada", title)
+                    return
+            except Exception:
+                return
+            try:
+                if win.is_minimized() and state != "minimized":
+                    win.restore()
+            except Exception:
+                pass
+            if state == "maximized":
+                try:
+                    if not win.is_maximized():
+                        win.maximize()
+                except Exception:
+                    pass
+            elif state == "minimized":
+                try:
+                    win.minimize()
+                except Exception:
+                    pass
+            elif state == "normal":
+                try:
+                    if win.is_maximized() or win.is_minimized():
+                        win.restore()
+                except Exception:
+                    pass
+            try:
+                win.set_focus()
+            except Exception:
+                pass
+            self._last_anchor_ts = ahora
+            logger.debug("Anchor OK: '{}' → {}", title, state)
+        except Exception as exc:
+            logger.debug("Anchor falló para '{}': {}", title, exc)
 
     def _focus_window(self, titulo: str):
         win = Desktop(backend="uia").window(title_re=f".*{titulo}.*") if titulo else None
