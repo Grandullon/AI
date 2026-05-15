@@ -101,11 +101,14 @@ class PopupWatchdog(threading.Thread):
         self.polling_ms = polling_ms
         self.ignorar = ignorar_titulos or []
         self.cerrar_automaticamente = cerrar_automaticamente
-        self._stop = threading.Event()
+        # OJO: no usar self._stop como nombre. threading.Thread tiene un
+        # método interno _stop() que es invocado por join(). Si lo pisamos
+        # con un Event, join() lanza "TypeError: 'Event' object is not callable".
+        self._stop_event = threading.Event()
         self._baseline: set[int] = set()
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
 
     def reset_baseline(self) -> None:
         if not _HAS_PYWINAUTO:
@@ -119,7 +122,7 @@ class PopupWatchdog(threading.Thread):
         if not _HAS_PYWINAUTO:
             return
         self.reset_baseline()
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             try:
                 actuales = Desktop(backend="uia").windows()
                 for w in actuales:

@@ -275,6 +275,10 @@ class Recorder:
                         selector=sel,
                         descripcion=f"Click en {desc}",
                         delay_before_s=delay,
+                        # Guardamos coordenadas originales como fallback:
+                        # si el selector simbólico no se resuelve al reproducir,
+                        # el player hace click_at_xy en estas coordenadas.
+                        extra={"fallback_xy": [evt.x, evt.y]},
                     ))
                 else:
                     pasos.append(Step(

@@ -223,7 +223,7 @@ class Player:
         sel = paso.selector
         if sel is None or sel.is_empty():
             raise ValueError("Paso click_control sin selector")
-        win = self._focus_window(self.macro.ventana_principal) if self.macro.ventana_principal else Desktop(backend="uia")
+
         kwargs = {}
         if sel.name:
             kwargs["title"] = sel.name
@@ -233,12 +233,61 @@ class Player:
             kwargs["auto_id"] = sel.auto_id
         if sel.class_name:
             kwargs["class_name"] = sel.class_name
-        ctrl = win.child_window(**kwargs)
-        ctrl.wait("visible enabled", timeout=paso.timeout_s)
-        return ctrl
+
+        if self.macro.ventana_principal:
+            win = self._focus_window(self.macro.ventana_principal)
+            ctrl = win.child_window(**kwargs)
+            ctrl.wait("visible enabled", timeout=paso.timeout_s)
+            return ctrl
+
+        # Sin ventana_principal: iterar ventanas top-level visibles
+        # (Desktop() no tiene child_window directamente). Cogemos el primer
+        # match. Heurística: probar primero la ventana en foreground.
+        desktop = Desktop(backend="uia")
+        ventanas = []
+        try:
+            for w in desktop.windows():
+                try:
+                    if w.is_visible():
+                        ventanas.append(w)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        last_err: Exception | None = None
+        for w in ventanas:
+            try:
+                ctrl = w.child_window(**kwargs)
+                if ctrl.exists(timeout=0.2):
+                    try:
+                        ctrl.wait("visible enabled", timeout=min(paso.timeout_s, 5.0))
+                    except Exception:
+                        pass
+                    return ctrl
+            except Exception as exc:
+                last_err = exc
+                continue
+        raise RuntimeError(f"No se encontró control {kwargs} en ninguna ventana visible: {last_err}")
 
     def _click_control(self, paso: Step) -> None:
-        ctrl = self._resolve_control(paso)
+        try:
+            ctrl = self._resolve_control(paso)
+        except Exception as exc:
+            # Fallback: usar las coordenadas originales capturadas durante la grabación.
+            fallback = paso.extra.get("fallback_xy") if paso.extra else None
+            if fallback and len(fallback) == 2:
+                x, y = int(fallback[0]), int(fallback[1])
+                logger.warning(
+                    "Selector no resuelto, fallback a click_at_xy ({},{}): {}", x, y, exc,
+                )
+                if self.dry_run:
+                    logger.info("[dry-run] click_at_xy fallback → ({}, {})", x, y)
+                    time.sleep(0.2)
+                    return
+                self._click_xy(x, y)
+                return
+            raise
         if self.dry_run:
             try:
                 ctrl.draw_outline(colour="red", thickness=3)

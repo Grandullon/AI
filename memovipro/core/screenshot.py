@@ -24,8 +24,13 @@ def capturar_pantalla_completa(dest_dir: str | Path, prefijo: str = "screen") ->
     dest.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     out = dest / f"{prefijo}_{ts}.png"
-    with mss.mss() as sct:
-        mss.tools.to_png(sct.grab(sct.monitors[0])[:], sct.grab(sct.monitors[0]).size, output=str(out))
+    try:
+        with mss.mss() as sct:
+            monitor = sct.monitors[0]  # monitor 0 = todos los monitores combinados
+            shot = sct.grab(monitor)
+            mss.tools.to_png(shot.rgb, shot.size, output=str(out))
+    except Exception:
+        return None
     return out
 
 
