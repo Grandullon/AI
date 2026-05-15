@@ -59,6 +59,7 @@ class EventoCrudo:
     y: int = 0
     button: str = "left"  # 'left' | 'right' | 'middle'
     double: bool = False
+    modifiers: str = ""  # ej. "ctrl" | "ctrl+shift" | "" (sin modificadores)
     valor: str = ""
     descripcion: str = ""
     timestamp: float = 0.0
@@ -72,6 +73,44 @@ def _button_corto(button) -> str:
     if "middle" in s:
         return "middle"
     return "left"
+
+
+def _modifier_for(nombre: str) -> str | None:
+    """Devuelve 'ctrl' | 'shift' | 'alt' si `nombre` es una tecla modificadora.
+
+    pynput entrega ctrl_l, ctrl_r, shift_l, shift_r, alt_l, alt_r, alt_gr...
+    Los unificamos a un solo nombre lógico por familia.
+    """
+    n = nombre.lower()
+    if n in ("ctrl", "ctrl_l", "ctrl_r"):
+        return "ctrl"
+    if n in ("shift", "shift_l", "shift_r"):
+        return "shift"
+    if n in ("alt", "alt_l", "alt_r", "alt_gr"):
+        return "alt"
+    return None
+
+
+def _modifiers_sendkeys_prefix(mods: set[str]) -> str:
+    """Construye el prefijo SendKeys (estilo pywinauto): ^ + % para Ctrl/Shift/Alt.
+
+    Orden estándar: Ctrl+Alt+Shift.
+    """
+    prefix = ""
+    if "ctrl" in mods:
+        prefix += "^"
+    if "alt" in mods:
+        prefix += "%"
+    if "shift" in mods:
+        prefix += "+"
+    return prefix
+
+
+def _modifiers_str(mods: set[str]) -> str:
+    """Serializa el set a 'ctrl+shift' (orden estable)."""
+    orden = ["ctrl", "alt", "shift"]
+    presentes = [m for m in orden if m in mods]
+    return "+".join(presentes)
 
 
 def _selector_desde_punto(x: int, y: int) -> tuple[Selector | None, str]:
@@ -130,6 +169,10 @@ class Recorder:
         self._grabando = False
         self._mouse_listener = None
         self._kb_listener = None
+        # Estado vivo de teclas modificadoras pulsadas. Se rellena en
+        # _on_press y se vacía en _on_release. Los clics y las teclas
+        # con Ctrl/Alt activo lo consultan para etiquetarse.
+        self._modifiers: set[str] = set()
 
     # Propiedad usada por la GUI para el contador en vivo.
     @property
@@ -142,8 +185,9 @@ class Recorder:
         self._grabando = True
         self.eventos_crudos = []
         self._buf = _BufferTexto()
+        self._modifiers = set()
         self._mouse_listener = mouse.Listener(on_click=self._on_click)
-        self._kb_listener = keyboard.Listener(on_press=self._on_press, on_release=lambda k: None)
+        self._kb_listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
         self._mouse_listener.start()
         self._kb_listener.start()
 
@@ -183,29 +227,44 @@ class Recorder:
             self._flush_text(force=True)
             btn = _button_corto(button)
             ahora = time.time()
-            # ¿Es la segunda mitad de un doble clic?
+            mods_str = _modifiers_str(self._modifiers)
+            # ¿Es la segunda mitad de un doble clic? Solo si los modificadores
+            # coinciden (Ctrl+Click y Click siguiente NO son doble clic).
             if self.eventos_crudos:
                 ultimo = self.eventos_crudos[-1]
                 if (
                     ultimo.tipo == "click"
                     and not ultimo.double
                     and ultimo.button == btn
+                    and ultimo.modifiers == mods_str
                     and (ahora - ultimo.timestamp) < DOUBLE_CLICK_THRESHOLD_S
                     and abs(ultimo.x - int(x)) <= DOUBLE_CLICK_RADIUS_PX
                     and abs(ultimo.y - int(y)) <= DOUBLE_CLICK_RADIUS_PX
                 ):
                     ultimo.double = True
-                    sufijo = "" if btn == "left" else f" [{btn}]"
-                    ultimo.descripcion = f"Doble click ({ultimo.x},{ultimo.y}){sufijo}"
+                    ultimo.descripcion = self._descripcion_click(
+                        ultimo.x, ultimo.y, btn, mods_str, double=True,
+                    )
                     return
-            sufijo = "" if btn == "left" else f" [{btn}]"
             self.eventos_crudos.append(EventoCrudo(
                 tipo="click",
                 x=int(x), y=int(y),
                 button=btn,
-                descripcion=f"Click ({x},{y}){sufijo}",
+                modifiers=mods_str,
+                descripcion=self._descripcion_click(int(x), int(y), btn, mods_str, double=False),
                 timestamp=ahora,
             ))
+
+    @staticmethod
+    def _descripcion_click(x: int, y: int, btn: str, mods: str, double: bool) -> str:
+        partes = []
+        if mods:
+            partes.append(mods.replace("+", "+").upper())
+        partes.append("Doble click" if double else "Click")
+        if btn != "left":
+            partes.append(f"[{btn}]")
+        partes.append(f"({x},{y})")
+        return " ".join(partes)
 
     def _on_press(self, key):
         if not self._grabando:
@@ -213,21 +272,50 @@ class Recorder:
         nombre = str(key).replace("Key.", "").replace("'", "")
         if nombre in TECLAS_IGNORADAS:
             return
+        # Tecla modificadora: solo actualizar estado, sin emitir evento.
+        mod = _modifier_for(nombre)
+        if mod is not None:
+            with self._lock:
+                self._modifiers.add(mod)
+                # Si había buffer de texto, flush antes (un Ctrl que llega
+                # interrumpe el flujo de tecleo natural).
+                self._flush_text(force=True)
+            return
         with self._lock:
             char = self._tecla_a_char(key)
-            if char is not None:
+            # Si hay Ctrl o Alt activos, es un atajo (Ctrl+A, Alt+F, ...)
+            # — no texto normal. Shift solo se considera "texto en mayúscula"
+            # y se deja al buffer.
+            non_shift_mods = self._modifiers - {"shift"}
+            if char is not None and not non_shift_mods:
                 self._buf.texto += char
                 self._buf.ultimo_ts = time.time()
                 return
             self._flush_text(force=True)
-            token = self._tecla_a_send_keys(key)
-            if token:
-                self.eventos_crudos.append(EventoCrudo(
-                    tipo="send_keys",
-                    valor=token,
-                    descripcion=f"Tecla {token}",
-                    timestamp=time.time(),
-                ))
+            if char is not None:
+                # Letra con Ctrl/Alt: emitir como atajo de teclado.
+                token = _modifiers_sendkeys_prefix(self._modifiers) + char
+            else:
+                base = self._tecla_a_send_keys(key)
+                if not base:
+                    return
+                token = _modifiers_sendkeys_prefix(self._modifiers) + base
+            self.eventos_crudos.append(EventoCrudo(
+                tipo="send_keys",
+                valor=token,
+                descripcion=f"Tecla {token}",
+                timestamp=time.time(),
+            ))
+
+    def _on_release(self, key):
+        if not self._grabando:
+            return
+        nombre = str(key).replace("Key.", "").replace("'", "")
+        mod = _modifier_for(nombre)
+        if mod is None:
+            return
+        with self._lock:
+            self._modifiers.discard(mod)
 
     def _flush_text(self, force: bool = False) -> None:
         if not self._buf.texto:
@@ -304,7 +392,8 @@ class Recorder:
                 desc = evt.descripcion
                 if resolver_selectores:
                     sel, desc = _selector_desde_punto(evt.x, evt.y)
-                # Prefijo y sufijo según botón y doble
+                # Prefijos para la descripción del paso
+                mods_label = evt.modifiers.upper() + " " if evt.modifiers else ""
                 accion = "Doble click" if evt.double else "Click"
                 btn_suffix = "" if evt.button == "left" else f" [{evt.button}]"
                 if sel is not None:
@@ -313,10 +402,12 @@ class Recorder:
                         extra["button"] = evt.button
                     if evt.double:
                         extra["double"] = True
+                    if evt.modifiers:
+                        extra["modifiers"] = evt.modifiers
                     pasos.append(Step(
                         tipo=StepType.CLICK_CONTROL,
                         selector=sel,
-                        descripcion=f"{accion} en {desc}{btn_suffix}",
+                        descripcion=f"{mods_label}{accion} en {desc}{btn_suffix}",
                         delay_before_s=delay,
                         extra=extra,
                     ))
@@ -326,10 +417,12 @@ class Recorder:
                         extra["button"] = evt.button
                     if evt.double:
                         extra["double"] = True
+                    if evt.modifiers:
+                        extra["modifiers"] = evt.modifiers
                     pasos.append(Step(
                         tipo=StepType.CLICK_AT_XY,
                         extra=extra,
-                        descripcion=f"{accion} en ({evt.x},{evt.y}){btn_suffix} — sin selector",
+                        descripcion=f"{mods_label}{accion} en ({evt.x},{evt.y}){btn_suffix} — sin selector",
                         delay_before_s=delay,
                     ))
                 if on_progress is not None:

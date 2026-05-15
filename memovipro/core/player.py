@@ -71,6 +71,10 @@ class Player:
         # Cache del último anchor para no machacar UIA en cada paso.
         self._last_anchor_ts: float = 0.0
         self._anchor_min_interval_s: float = 0.5
+        # Modificadores pulsados actualmente (entre pasos). Permite mantener
+        # Ctrl/Shift/Alt presionado durante secuencias largas como
+        # "Ctrl+Click en 30 elementos" sin soltarlo entre clic y clic.
+        self._modifiers_held: set[str] = set()
 
     def abort(self) -> None:
         self._abort.set()
@@ -120,6 +124,11 @@ class Player:
                 # Re-anchor antes de cada paso (con throttling).
                 if self.macro.auto_anchor and self.macro.ventana_principal:
                     self._asegurar_ventana_objetivo()
+                # Ajustar modificadores pulsados al objetivo del paso.
+                # Mantiene Ctrl/Shift/Alt presionados continuamente cuando
+                # varios pasos consecutivos los necesitan (multi-selección).
+                target_mods = self._target_modifiers(paso_render)
+                self._adjust_modifiers(target_mods)
                 if self.on_status:
                     self.on_status(RunStatus(dni=dni, paso_idx=idx, descripcion=paso_render.descripcion or paso_render.tipo.value))
                 try:
@@ -139,6 +148,11 @@ class Player:
 
             return True, incidencias
         finally:
+            # Soltar siempre cualquier modificador que hayamos dejado pulsado.
+            try:
+                self._adjust_modifiers(set())
+            except Exception:
+                pass
             if self._watchdog:
                 self._watchdog.stop()
                 self._watchdog.join(timeout=1.0)
@@ -455,6 +469,54 @@ class Player:
             self._resolve_control(tmp)
             return
         time.sleep(float(cond.get("segundos", 1.0)))
+
+    # ---- Modificadores (Ctrl/Shift/Alt) mantenidos entre pasos ----
+
+    _MOD_VK = {"ctrl": "VK_CONTROL", "shift": "VK_SHIFT", "alt": "VK_MENU"}
+
+    @staticmethod
+    def _target_modifiers(paso: Step) -> set[str]:
+        """Lee el campo `extra.modifiers` ('ctrl+shift') y lo convierte a set."""
+        if not paso.extra:
+            return set()
+        raw = str(paso.extra.get("modifiers", "")).lower()
+        if not raw:
+            return set()
+        return {m.strip() for m in raw.split("+") if m.strip() in ("ctrl", "shift", "alt")}
+
+    def _adjust_modifiers(self, target: set[str]) -> None:
+        """Pulsa/suelta solo los modificadores que cambian.
+
+        Antes de cada paso, el player se asegura de que estén pulsadas
+        exactamente las teclas del set `target`. Si `target == self._modifiers_held`
+        no hace nada — esa es la clave para que un Ctrl+Click ×30 mantenga
+        Ctrl pulsado durante toda la secuencia.
+        """
+        if not _HAS_PYWINAUTO:
+            return
+        if target == self._modifiers_held:
+            return
+        a_soltar = self._modifiers_held - target
+        a_pulsar = target - self._modifiers_held
+        for m in a_soltar:
+            vk = self._MOD_VK.get(m)
+            if not vk:
+                continue
+            try:
+                pwkeyboard.send_keys("{" + vk + " up}")
+                logger.debug("Soltar modificador {}", m)
+            except Exception as exc:
+                logger.debug("Error soltando {}: {}", m, exc)
+        for m in a_pulsar:
+            vk = self._MOD_VK.get(m)
+            if not vk:
+                continue
+            try:
+                pwkeyboard.send_keys("{" + vk + " down}")
+                logger.debug("Pulsar modificador {}", m)
+            except Exception as exc:
+                logger.debug("Error pulsando {}: {}", m, exc)
+        self._modifiers_held = set(target)
 
     def _registrar_fallo(self, dni: str, idx: int, paso: Step, exc: StepFailed) -> Incidencia:
         shot = capturar_pantalla_completa(self.screenshots_dir, prefijo=f"fallo_{dni}_{idx}")
