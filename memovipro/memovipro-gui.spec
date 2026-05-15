@@ -14,6 +14,7 @@ a = Analysis(
     datas=[
         ('config.json', '.'),
         ('macros', 'macros'),
+        ('pipelines', 'pipelines'),
     ],
     hiddenimports=[
         'pywinauto',

@@ -86,23 +86,36 @@ def main(argv: list[str] | None = None) -> int:
     if argv is None and len(sys.argv) == 1 and getattr(sys, "frozen", False):
         return _ayuda_interactiva()
 
-    parser = argparse.ArgumentParser(prog="memovipro-run", description="Ejecuta una macro MemoviPro sin GUI.")
-    parser.add_argument("--macro", required=True, help="Nombre de la macro (sin extensión) o ruta al YAML")
-    parser.add_argument("--excel", required=True, help="Excel/CSV con la columna DNI")
-    parser.add_argument("--all", action="store_true", help="Procesar todos (ignorar checkpoint)")
+    parser = argparse.ArgumentParser(prog="memovipro-run", description="Ejecuta una macro o pipeline MemoviPro sin GUI.")
+    grupo = parser.add_mutually_exclusive_group(required=True)
+    grupo.add_argument("--macro", help="Nombre de la macro (sin extensión) o ruta al YAML — modo iteración por DNI")
+    grupo.add_argument("--pipeline", help="Nombre del pipeline (sin extensión) o ruta al YAML — modo cadena")
+    grupo.add_argument("--replay", help="Nombre de macro o ruta — modo reproducción simple N veces")
+    parser.add_argument("--excel", help="Excel/CSV con la columna DNI (solo con --macro)")
+    parser.add_argument("--veces", type=int, default=1, help="Veces a repetir (solo con --replay)")
+    parser.add_argument("--velocidad", type=float, default=1.0, help="Velocidad de replay (1.0 original, 0=sin pausas)")
+    parser.add_argument("--all", action="store_true", help="Procesar todos los DNIs ignorando checkpoint (solo --macro)")
     parser.add_argument("--dry-run", action="store_true", help="Simulación: resalta sin clicar")
-    parser.add_argument("--no-retry", action="store_true", help="No reintentar KO al final")
+    parser.add_argument("--no-retry", action="store_true", help="No reintentar KO al final (--macro)")
     parser.add_argument("--no-notify", action="store_true", help="No enviar email aunque esté configurado")
     parser.add_argument("--data-dir", default=str(ROOT / "data"), help="Carpeta de incidencias/checkpoints")
-    parser.add_argument("--macros-dir", default=str(ROOT / "macros"), help="Carpeta donde buscar la macro por nombre")
+    parser.add_argument("--macros-dir", default=str(ROOT / "macros"), help="Carpeta de macros")
+    parser.add_argument("--pipelines-dir", default=str(ROOT / "pipelines"), help="Carpeta de pipelines")
     parser.add_argument("--logs-dir", default=str(ROOT / "logs"), help="Carpeta de logs")
     args = parser.parse_args(argv)
+
+    if args.macro and not args.excel:
+        parser.error("--macro requiere --excel")
 
     info = ensure_runtime_folders(ROOT)
     setup_logging(args.logs_dir)
     logger.info("=== MemoviPro CLI ===")
     logger.debug("Bootstrap: {}", info)
-    logger.info("macro={} excel={} dry_run={} all={}", args.macro, args.excel, args.dry_run, args.all)
+    logger.info(
+        "modo={} dry_run={} veces={}",
+        "pipeline" if args.pipeline else ("replay" if args.replay else "macro"),
+        args.dry_run, args.veces,
+    )
 
     macros_dir = Path(args.macros_dir)
     data_dir = Path(args.data_dir)
@@ -110,6 +123,66 @@ def main(argv: list[str] | None = None) -> int:
     data_dir.mkdir(parents=True, exist_ok=True)
     screenshots_dir.mkdir(parents=True, exist_ok=True)
 
+    # ---- modo --pipeline ----
+    if args.pipeline:
+        from core.pipeline import Pipeline
+        from core.pipeline_runner import PipelineRunner
+        pipelines_dir = Path(args.pipelines_dir)
+        pipelines_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            p = Path(args.pipeline)
+            if p.is_file():
+                pipeline_path = p
+            else:
+                pipeline_path = pipelines_dir / f"{args.pipeline}.yaml"
+                if not pipeline_path.exists():
+                    pipeline_path = pipelines_dir / f"{args.pipeline}.yml"
+            pipeline = Pipeline.load(pipeline_path)
+        except Exception as exc:
+            logger.error("No se pudo cargar el pipeline: {}", exc)
+            return 1
+        runner = PipelineRunner(
+            pipeline=pipeline,
+            macros_dir=macros_dir,
+            screenshots_dir=screenshots_dir,
+            data_dir=data_dir,
+        )
+        try:
+            psum = runner.run()
+        except Exception:
+            logger.exception("Error fatal durante el pipeline")
+            return 1
+        logger.info(
+            "Pipeline '{}' fin · ok={} ko={} pasos={}",
+            psum.nombre, psum.total_ok, psum.total_ko, len(psum.pasos_resultado),
+        )
+        return 0 if psum.total_ko == 0 and not psum.abortado else 2
+
+    # ---- modo --replay ----
+    if args.replay:
+        from core.replay_runner import ReplayRunner
+        try:
+            macro_path = _resolver_macro(args.replay, macros_dir)
+            macro = Macro.load(macro_path)
+        except Exception as exc:
+            logger.error("No se pudo cargar la macro: {}", exc)
+            return 1
+        runner = ReplayRunner(
+            macro=macro,
+            veces=args.veces,
+            velocidad=args.velocidad,
+            screenshots_dir=screenshots_dir,
+            data_dir=data_dir,
+        )
+        try:
+            rsum = runner.run()
+        except Exception:
+            logger.exception("Error fatal durante replay")
+            return 1
+        logger.info("Replay fin · total={} ok={} ko={}", rsum.total, rsum.ok, rsum.ko)
+        return 0 if rsum.ko == 0 else 2
+
+    # ---- modo --macro --excel (DNI) ----
     try:
         macro_path = _resolver_macro(args.macro, macros_dir)
         macro = Macro.load(macro_path)

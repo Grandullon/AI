@@ -53,18 +53,20 @@ def ensure_runtime_folders(root: Path) -> dict:
     """
     root = Path(root)
     creadas = []
-    for sub in ("data", "data/screenshots", "logs", "macros"):
+    for sub in ("data", "data/screenshots", "logs", "macros", "pipelines"):
         p = root / sub
         if not p.exists():
             p.mkdir(parents=True, exist_ok=True)
             creadas.append(str(p))
 
     copiados_macros = 0
+    copiados_pipelines = 0
     config_copiado = False
 
     bundle = _bundle_dir()
     if bundle is not None:
         copiados_macros = _copiar_si_falta(bundle / "macros", root / "macros")
+        copiados_pipelines = _copiar_si_falta(bundle / "pipelines", root / "pipelines")
         bundle_cfg = bundle / "config.json"
         dest_cfg = root / "config.json"
         if bundle_cfg.exists() and not dest_cfg.exists():
@@ -75,6 +77,7 @@ def ensure_runtime_folders(root: Path) -> dict:
         "root": str(root),
         "carpetas_creadas": creadas,
         "macros_copiadas": copiados_macros,
+        "pipelines_copiados": copiados_pipelines,
         "config_copiado": config_copiado,
         "bundle_dir": str(bundle) if bundle else None,
     }

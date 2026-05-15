@@ -25,6 +25,8 @@ def main() -> int:
     info = ensure_runtime_folders(ROOT)
     data_dir = ROOT / "data"
     macros_dir = ROOT / "macros"
+    pipelines_dir = ROOT / "pipelines"
+    pipelines_dir.mkdir(exist_ok=True)
     logs_dir = ROOT / "logs"
 
     setup_logging(logs_dir)
@@ -32,7 +34,7 @@ def main() -> int:
     logger.info("Bootstrap: {}", info)
 
     app = QApplication(sys.argv)
-    win = MainWindow(data_dir=data_dir, macros_dir=macros_dir)
+    win = MainWindow(data_dir=data_dir, macros_dir=macros_dir, pipelines_dir=pipelines_dir)
     win.show()
     return app.exec()
 

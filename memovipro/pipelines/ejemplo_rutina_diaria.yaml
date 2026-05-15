@@ -1,0 +1,15 @@
+version: 1
+nombre: ejemplo_rutina_diaria
+descripcion: Plantilla de rutina matinal — adapta los nombres de macro a las tuyas.
+pasos:
+  - macro: descarga_personal_activo
+    descripcion: Descargar PA-Diario
+    on_fail: continue   # si falla, seguimos con la siguiente
+  - macro: descarga_it
+    descripcion: Listado IT del día
+    pausa_antes_s: 10   # esperamos 10s para que LibreOffice cierre
+    on_fail: stop       # si esto falla, paramos toda la cadena
+  - macro: huelga
+    descripcion: Listado de huelgas
+    pausa_antes_s: 5
+    condicion: todos_ok # solo si las anteriores fueron 100% OK

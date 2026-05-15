@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .incidents_view import IncidentsView
+from .pipeline_panel import PipelinePanel
 from .replay_panel import ReplayPanel
 from .run_panel import RunPanel
 from .schedule_panel import SchedulePanel
@@ -75,10 +76,12 @@ QMessageBox QLabel { color: #2c3e50; }
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, data_dir: Path, macros_dir: Path):
+    def __init__(self, data_dir: Path, macros_dir: Path, pipelines_dir: Path | None = None):
         super().__init__()
         self.data_dir = data_dir
         self.macros_dir = macros_dir
+        self.pipelines_dir = pipelines_dir or (macros_dir.parent / "pipelines")
+        self.pipelines_dir.mkdir(parents=True, exist_ok=True)
         self.setWindowTitle("MemoviPro — Automatización IT")
         self.setGeometry(100, 100, 1100, 700)
         self.setStyleSheet(APP_STYLE)
@@ -90,6 +93,11 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.step_editor = StepEditor(macros_dir=self.macros_dir)
         self.replay_panel = ReplayPanel(macros_dir=self.macros_dir, data_dir=self.data_dir)
+        self.pipeline_panel = PipelinePanel(
+            macros_dir=self.macros_dir,
+            pipelines_dir=self.pipelines_dir,
+            data_dir=self.data_dir,
+        )
         self.run_panel = RunPanel(
             macros_dir=self.macros_dir,
             data_dir=self.data_dir,
@@ -101,6 +109,7 @@ class MainWindow(QMainWindow):
 
         self.tabs.addTab(self.step_editor, "Macros")
         self.tabs.addTab(self.replay_panel, "Reproducir")
+        self.tabs.addTab(self.pipeline_panel, "Cadenas")
         self.tabs.addTab(self.run_panel, "Ejecutar (por DNI)")
         self.tabs.addTab(self.schedule_panel, "Programación")
         self.tabs.addTab(self.secrets_panel, "Secretos")
