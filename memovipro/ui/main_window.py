@@ -104,7 +104,11 @@ class MainWindow(QMainWindow):
             on_finished=self._on_run_finished,
         )
         self.incidents_view = IncidentsView(data_dir=self.data_dir)
-        self.schedule_panel = SchedulePanel(macros_dir=self.macros_dir, data_dir=self.data_dir)
+        self.schedule_panel = SchedulePanel(
+            macros_dir=self.macros_dir,
+            data_dir=self.data_dir,
+            pipelines_dir=self.pipelines_dir,
+        )
         self.secrets_panel = SecretsPanel(data_dir=self.data_dir)
 
         self.tabs.addTab(self.step_editor, "Macros")

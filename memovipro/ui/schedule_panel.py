@@ -1,12 +1,28 @@
+"""Panel de programación de tareas con Windows Task Scheduler.
+
+Soporta tres modos de tarea:
+  1. Reproducir N veces (replay) — el caso más común: macro → N veces.
+     No requiere Excel.
+  2. Pipeline (cadena) — ejecuta una cadena completa por nombre.
+     No requiere Excel, los detalles van en el YAML del pipeline.
+  3. Por DNI desde Excel — iterar una macro sobre una lista de DNIs.
+
+El usuario selecciona el modo arriba y la UI muestra solo los campos
+relevantes. Internamente se construye la línea CLI adecuada para el
+.exe (`memovipro-run.exe --replay ...`, `--pipeline ...` o
+`--macro ... --excel ...`).
+"""
 from __future__ import annotations
 
 import sys
+from datetime import time as dtime
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTime
+from PyQt6.QtCore import QTime
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -14,6 +30,8 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSpinBox,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTimeEdit,
@@ -33,17 +51,26 @@ DIAS = [("LUN", "MON"), ("MAR", "TUE"), ("MIE", "WED"), ("JUE", "THU"),
         ("VIE", "FRI"), ("SAB", "SAT"), ("DOM", "SUN")]
 
 
+MODO_REPLAY = "replay"
+MODO_PIPELINE = "pipeline"
+MODO_DNI = "dni"
+
+
+VELOCIDADES = [
+    ("0.5x  (mitad)", 0.5),
+    ("1x  (original)", 1.0),
+    ("1.5x", 1.5),
+    ("2x", 2.0),
+    ("Máxima (sin pausas)", 0.0),
+]
+
+
 class SchedulePanel(QWidget):
-    """Programa, lista y elimina tareas en Windows Task Scheduler.
-
-    Solo funcional en Windows. En el resto de plataformas el panel se
-    muestra con un aviso pero no permite alta.
-    """
-
-    def __init__(self, macros_dir: Path, data_dir: Path):
+    def __init__(self, macros_dir: Path, data_dir: Path, pipelines_dir: Path | None = None):
         super().__init__()
         self.macros_dir = macros_dir
         self.data_dir = data_dir
+        self.pipelines_dir = pipelines_dir or (macros_dir.parent / "pipelines")
 
         layout = QVBoxLayout(self)
 
@@ -52,36 +79,91 @@ class SchedulePanel(QWidget):
             warn.setStyleSheet("color: #c0392b; font-weight: bold;")
             layout.addWidget(warn)
 
-        layout.addWidget(QLabel("<b>Crear nueva tarea programada</b>"))
+        layout.addWidget(QLabel("<b>Crear tarea programada</b>"))
+
+        fila_modo = QHBoxLayout()
+        fila_modo.addWidget(QLabel("Tipo de tarea:"))
+        self.modo_combo = QComboBox()
+        self.modo_combo.addItem("Reproducir macro N veces  (sin Excel)", MODO_REPLAY)
+        self.modo_combo.addItem("Pipeline / cadena de macros  (sin Excel)", MODO_PIPELINE)
+        self.modo_combo.addItem("Macro iterada por Excel de DNIs", MODO_DNI)
+        self.modo_combo.currentIndexChanged.connect(self._on_modo_changed)
+        fila_modo.addWidget(self.modo_combo, 1)
+        layout.addLayout(fila_modo)
 
         fila_nombre = QHBoxLayout()
-        self.tarea_nombre = QLineEdit()
-        self.tarea_nombre.setPlaceholderText("Ej. descarga_it_diaria")
         fila_nombre.addWidget(QLabel("Nombre tarea:"))
+        self.tarea_nombre = QLineEdit()
+        self.tarea_nombre.setPlaceholderText("Ej. descarga_pa_diaria")
         fila_nombre.addWidget(self.tarea_nombre, 1)
         layout.addLayout(fila_nombre)
 
-        fila_macro = QHBoxLayout()
-        self.macro_combo = QComboBox()
-        self._refresh_macros()
-        refresh_btn = QPushButton("↻")
-        refresh_btn.setMaximumWidth(40)
-        refresh_btn.clicked.connect(self._refresh_macros)
-        fila_macro.addWidget(QLabel("Macro:"))
-        fila_macro.addWidget(self.macro_combo, 1)
-        fila_macro.addWidget(refresh_btn)
-        layout.addLayout(fila_macro)
+        # === Paneles específicos por modo (uno visible a la vez) ===
+        self.stack = QStackedWidget()
+        layout.addWidget(self.stack)
 
-        fila_excel = QHBoxLayout()
+        # --- Modo Replay ---
+        replay_widget = QWidget()
+        replay_lay = QVBoxLayout(replay_widget)
+        replay_lay.setContentsMargins(0, 0, 0, 0)
+        fila_r1 = QHBoxLayout()
+        fila_r1.addWidget(QLabel("Macro:"))
+        self.macro_combo_replay = QComboBox()
+        fila_r1.addWidget(self.macro_combo_replay, 1)
+        replay_lay.addLayout(fila_r1)
+        fila_r2 = QHBoxLayout()
+        fila_r2.addWidget(QLabel("Veces:"))
+        self.veces_spin = QSpinBox()
+        self.veces_spin.setRange(1, 9999)
+        self.veces_spin.setValue(1)
+        self.veces_spin.setMaximumWidth(110)
+        fila_r2.addWidget(self.veces_spin)
+        fila_r2.addSpacing(15)
+        fila_r2.addWidget(QLabel("Velocidad:"))
+        self.velocidad_combo = QComboBox()
+        for label, _ in VELOCIDADES:
+            self.velocidad_combo.addItem(label)
+        self.velocidad_combo.setCurrentIndex(1)
+        fila_r2.addWidget(self.velocidad_combo, 1)
+        replay_lay.addLayout(fila_r2)
+        self.stack.addWidget(replay_widget)
+
+        # --- Modo Pipeline ---
+        pipeline_widget = QWidget()
+        pipeline_lay = QVBoxLayout(pipeline_widget)
+        pipeline_lay.setContentsMargins(0, 0, 0, 0)
+        fila_p = QHBoxLayout()
+        fila_p.addWidget(QLabel("Pipeline:"))
+        self.pipeline_combo = QComboBox()
+        fila_p.addWidget(self.pipeline_combo, 1)
+        pipeline_lay.addLayout(fila_p)
+        pipeline_lay.addWidget(QLabel(
+            "<i>El número de iteraciones, la velocidad y la política on_fail "
+            "se definen dentro del YAML del pipeline.</i>"
+        ))
+        self.stack.addWidget(pipeline_widget)
+
+        # --- Modo DNI por Excel ---
+        dni_widget = QWidget()
+        dni_lay = QVBoxLayout(dni_widget)
+        dni_lay.setContentsMargins(0, 0, 0, 0)
+        fila_d1 = QHBoxLayout()
+        fila_d1.addWidget(QLabel("Macro:"))
+        self.macro_combo_dni = QComboBox()
+        fila_d1.addWidget(self.macro_combo_dni, 1)
+        dni_lay.addLayout(fila_d1)
+        fila_d2 = QHBoxLayout()
+        fila_d2.addWidget(QLabel("Excel DNIs:"))
         self.excel_path = QLineEdit()
-        self.excel_path.setPlaceholderText("Ruta absoluta al Excel/CSV de DNIs")
+        self.excel_path.setPlaceholderText("Ruta absoluta al Excel/CSV con columna DNI")
+        fila_d2.addWidget(self.excel_path, 1)
         browse = QPushButton("Examinar…")
-        browse.clicked.connect(self._browse)
-        fila_excel.addWidget(QLabel("Excel DNIs:"))
-        fila_excel.addWidget(self.excel_path, 1)
-        fila_excel.addWidget(browse)
-        layout.addLayout(fila_excel)
+        browse.clicked.connect(self._browse_excel)
+        fila_d2.addWidget(browse)
+        dni_lay.addLayout(fila_d2)
+        self.stack.addWidget(dni_widget)
 
+        # === Frecuencia / hora / días ===
         fila_freq = QHBoxLayout()
         self.freq_combo = QComboBox()
         self.freq_combo.addItems(["Diaria", "Semanal", "Al iniciar sesión"])
@@ -91,10 +173,11 @@ class SchedulePanel(QWidget):
         fila_freq.addWidget(self.freq_combo)
         fila_freq.addWidget(QLabel("Hora:"))
         fila_freq.addWidget(self.hora)
+        fila_freq.addStretch()
         layout.addLayout(fila_freq)
 
         fila_dias = QHBoxLayout()
-        fila_dias.addWidget(QLabel("Días (solo semanal):"))
+        fila_dias.addWidget(QLabel("Días (semanal):"))
         self.checks_dias: list[tuple[QCheckBox, str]] = []
         for etiqueta, code in DIAS:
             cb = QCheckBox(etiqueta)
@@ -113,16 +196,16 @@ class SchedulePanel(QWidget):
         fila_exe.addWidget(browse_exe)
         layout.addLayout(fila_exe)
 
-        fila_extras = QHBoxLayout()
-        self.no_retry = QCheckBox("--no-retry")
-        self.no_notify = QCheckBox("--no-notify")
-        self.all_dnis = QCheckBox("--all (ignorar checkpoint)")
-        fila_extras.addWidget(QLabel("Flags:"))
-        fila_extras.addWidget(self.no_retry)
-        fila_extras.addWidget(self.no_notify)
-        fila_extras.addWidget(self.all_dnis)
-        fila_extras.addStretch()
-        layout.addLayout(fila_extras)
+        fila_flags = QHBoxLayout()
+        self.flag_no_notify = QCheckBox("--no-notify")
+        self.flag_no_retry = QCheckBox("--no-retry  (solo modo DNI)")
+        self.flag_all = QCheckBox("--all  (solo modo DNI: ignora checkpoint)")
+        fila_flags.addWidget(QLabel("Flags:"))
+        fila_flags.addWidget(self.flag_no_notify)
+        fila_flags.addWidget(self.flag_no_retry)
+        fila_flags.addWidget(self.flag_all)
+        fila_flags.addStretch()
+        layout.addLayout(fila_flags)
 
         crear = QPushButton("Programar tarea")
         crear.clicked.connect(self._crear)
@@ -146,16 +229,35 @@ class SchedulePanel(QWidget):
         fila_btns.addStretch()
         layout.addLayout(fila_btns)
 
+        self._refresh_macros_y_pipelines()
         self.refresh_tareas()
+        self._on_modo_changed()
 
-    def _refresh_macros(self):
-        self.macro_combo.clear()
-        for p in sorted(self.macros_dir.glob("*.yaml")):
-            self.macro_combo.addItem(p.stem)
-        for p in sorted(self.macros_dir.glob("*.yml")):
-            self.macro_combo.addItem(p.stem)
+    # ---- helpers ----
+    def _refresh_macros_y_pipelines(self):
+        macros = [p.stem for p in sorted(self.macros_dir.glob("*.yaml"))]
+        macros += [p.stem for p in sorted(self.macros_dir.glob("*.yml"))]
+        self.macro_combo_replay.clear()
+        self.macro_combo_dni.clear()
+        for m in macros:
+            self.macro_combo_replay.addItem(m)
+            self.macro_combo_dni.addItem(m)
 
-    def _browse(self):
+        pipelines = [p.stem for p in sorted(self.pipelines_dir.glob("*.yaml"))]
+        pipelines += [p.stem for p in sorted(self.pipelines_dir.glob("*.yml"))]
+        self.pipeline_combo.clear()
+        for p in pipelines:
+            self.pipeline_combo.addItem(p)
+
+    def _on_modo_changed(self):
+        idx = self.modo_combo.currentIndex()
+        self.stack.setCurrentIndex(idx)
+        modo = self.modo_combo.currentData()
+        # Habilitar/deshabilitar flags según relevancia
+        self.flag_no_retry.setEnabled(modo == MODO_DNI)
+        self.flag_all.setEnabled(modo == MODO_DNI)
+
+    def _browse_excel(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Seleccionar Excel/CSV", "",
             "Datos (*.xlsx *.xls *.csv)",
@@ -173,54 +275,86 @@ class SchedulePanel(QWidget):
         if path:
             self.exe_path.setText(path)
 
+    # ---- construir args CLI según el modo elegido ----
+    def _args_para_modo_actual(self) -> list[str] | None:
+        modo = self.modo_combo.currentData()
+        if modo == MODO_REPLAY:
+            macro = self.macro_combo_replay.currentText().strip()
+            if not macro:
+                QMessageBox.warning(self, "Falta macro", "Selecciona una macro.")
+                return None
+            veces = self.veces_spin.value()
+            velocidad = VELOCIDADES[self.velocidad_combo.currentIndex()][1]
+            args = ["--replay", macro, "--veces", str(veces), "--velocidad", str(velocidad)]
+            if self.flag_no_notify.isChecked():
+                args.append("--no-notify")
+            return args
+        if modo == MODO_PIPELINE:
+            pipeline = self.pipeline_combo.currentText().strip()
+            if not pipeline:
+                QMessageBox.warning(self, "Falta pipeline", "Crea primero un pipeline en la pestaña Cadenas.")
+                return None
+            args = ["--pipeline", pipeline]
+            if self.flag_no_notify.isChecked():
+                args.append("--no-notify")
+            return args
+        if modo == MODO_DNI:
+            macro = self.macro_combo_dni.currentText().strip()
+            excel = self.excel_path.text().strip()
+            if not macro or not excel:
+                QMessageBox.warning(self, "Faltan datos", "En modo DNI hay que indicar macro y Excel.")
+                return None
+            args = ["--macro", macro, "--excel", excel]
+            if self.flag_no_retry.isChecked():
+                args.append("--no-retry")
+            if self.flag_no_notify.isChecked():
+                args.append("--no-notify")
+            if self.flag_all.isChecked():
+                args.append("--all")
+            return args
+        return None
+
     def _crear(self):
         nombre = self.tarea_nombre.text().strip()
-        macro = self.macro_combo.currentText().strip()
-        excel = self.excel_path.text().strip()
-        if not nombre or not macro or not excel:
-            QMessageBox.warning(self, "Faltan datos", "Rellena nombre, macro y Excel.")
+        if not nombre:
+            QMessageBox.warning(self, "Sin nombre", "Pon un nombre a la tarea.")
             return
 
-        modo = self.freq_combo.currentText()
+        args = self._args_para_modo_actual()
+        if args is None:
+            return
+
+        modo_txt = self.freq_combo.currentText()
         hora_qt = self.hora.time()
-        from datetime import time as dtime
         hora = dtime(hora_qt.hour(), hora_qt.minute())
 
-        if modo == "Diaria":
+        if modo_txt == "Diaria":
             freq = Frecuencia(diaria=True, hora=hora)
-        elif modo == "Semanal":
+        elif modo_txt == "Semanal":
             dias = tuple(code for cb, code in self.checks_dias if cb.isChecked())
             if not dias:
-                QMessageBox.warning(self, "Días", "Selecciona al menos un día para la frecuencia semanal.")
+                QMessageBox.warning(self, "Días", "Selecciona al menos un día.")
                 return
             freq = Frecuencia(semanal=True, dias_semana=dias, hora=hora)
         else:
             freq = Frecuencia(al_iniciar_sesion=True)
 
-        extras: list[str] = []
-        if self.no_retry.isChecked():
-            extras.append("--no-retry")
-        if self.no_notify.isChecked():
-            extras.append("--no-notify")
-        if self.all_dnis.isChecked():
-            extras.append("--all")
-
         ok = crear_tarea(
             nombre=nombre,
-            macro=macro,
-            excel=excel,
+            args=args,
             frecuencia=freq,
             ejecutable=self.exe_path.text().strip() or None,
-            extra_args=extras,
         )
         if ok:
-            QMessageBox.information(self, "Tarea creada", f"Programada: MemoviPro_{nombre}")
+            QMessageBox.information(
+                self, "Tarea creada",
+                f"Programada: MemoviPro_{nombre}\n\nComando:\n{' '.join(args)}",
+            )
             self.refresh_tareas()
         else:
             QMessageBox.warning(
                 self, "Error",
-                "No se pudo crear la tarea. Revisa el log y confirma que tienes permisos."
-                " En Windows puede que necesites ejecutar MemoviPro como Administrador.",
+                "No se pudo crear la tarea. Revisa el log y confirma que tienes permisos.",
             )
 
     def _eliminar(self):

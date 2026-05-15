@@ -32,27 +32,38 @@ def test_frecuencia_default_es_diaria():
 
 
 def test_construir_accion_usa_python_si_no_hay_exe(tmp_path):
-    excel = tmp_path / "x.xlsx"
-    excel.write_text("dummy")
-    prog, args = construir_accion(macro="m1", excel=excel)
-    assert prog.lower().endswith(("python", "python.exe", "python3", "python3.exe", "memovipro_run", "memovipro-run", "memovipro-run.exe")) or "python" in prog.lower()
-    assert "--macro" in args and "m1" in args
-    assert str(excel.resolve()) in args
+    args = ["--macro", "m1", "--excel", str(tmp_path / "x.xlsx")]
+    prog, cmdline = construir_accion(args)
+    assert "python" in prog.lower()
+    assert "--macro" in cmdline and "m1" in cmdline
 
 
 def test_construir_accion_con_exe(tmp_path):
-    excel = tmp_path / "x.xlsx"
-    excel.write_text("dummy")
     fake_exe = tmp_path / "memovipro-run.exe"
     fake_exe.write_bytes(b"MZ\x00\x00")
-    prog, args = construir_accion(macro="m1", excel=excel, ejecutable=fake_exe)
+    args = ["--macro", "m1", "--excel", str(tmp_path / "x.xlsx")]
+    prog, cmdline = construir_accion(args, ejecutable=fake_exe)
     assert prog == str(fake_exe.resolve())
-    assert "--macro" in args
+    assert "--macro" in cmdline
 
 
-def test_construir_accion_propaga_extras(tmp_path):
-    excel = tmp_path / "x.xlsx"
-    excel.write_text("dummy")
-    _, args = construir_accion(macro="m1", excel=excel, extra_args=["--dry-run", "--no-retry"])
-    assert "--dry-run" in args
-    assert "--no-retry" in args
+def test_construir_accion_modo_replay():
+    args = ["--replay", "pa-activo", "--veces", "100", "--velocidad", "1.5"]
+    _, cmdline = construir_accion(args)
+    assert "--replay" in cmdline
+    assert "--veces" in cmdline
+    assert "100" in cmdline
+
+
+def test_construir_accion_modo_pipeline():
+    args = ["--pipeline", "rutina_diaria"]
+    _, cmdline = construir_accion(args)
+    assert "--pipeline" in cmdline
+    assert "rutina_diaria" in cmdline
+
+
+def test_construir_accion_propaga_extras():
+    args = ["--replay", "m1", "--veces", "3", "--dry-run", "--no-notify"]
+    _, cmdline = construir_accion(args)
+    assert "--dry-run" in cmdline
+    assert "--no-notify" in cmdline

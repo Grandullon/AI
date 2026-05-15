@@ -66,39 +66,38 @@ def _correr(cmd: list[str]) -> subprocess.CompletedProcess:
 
 
 def construir_accion(
-    macro: str,
-    excel: str | Path,
+    args: list[str],
     ejecutable: str | Path | None = None,
-    extra_args: list[str] | None = None,
 ) -> tuple[str, str]:
     """Devuelve (programa, argumentos) listos para schtasks /TR.
+
+    `args` es la lista de argumentos CLI ya preparada por el caller.
+    Por ejemplo:
+        ["--macro", "pa-activo", "--excel", "C:/dnis.xlsx"]
+        ["--replay", "pa-activo", "--veces", "100"]
+        ["--pipeline", "rutina_diaria"]
 
     Si `ejecutable` apunta a un .exe lo usa directamente. Si no, usa
     `python cli.py` desde la raíz del proyecto.
     """
-    extra = extra_args or []
     if ejecutable:
         exe = Path(ejecutable).resolve()
         if not exe.exists():
             raise FileNotFoundError(f"Ejecutable no encontrado: {exe}")
-        args = ["--macro", macro, "--excel", str(Path(excel).resolve()), *extra]
         return str(exe), subprocess.list2cmdline(args)
     py = Path(sys.executable).resolve()
     cli = Path(__file__).resolve().parents[1] / "cli.py"
-    args = [str(cli), "--macro", macro, "--excel", str(Path(excel).resolve()), *extra]
-    return str(py), subprocess.list2cmdline(args)
+    return str(py), subprocess.list2cmdline([str(cli), *args])
 
 
 def crear_tarea(
     nombre: str,
-    macro: str,
-    excel: str | Path,
+    args: list[str],
     frecuencia: Frecuencia,
     ejecutable: str | Path | None = None,
-    extra_args: list[str] | None = None,
     sobrescribir: bool = True,
 ) -> bool:
-    """Crea una tarea programada que lanza la macro indicada.
+    """Crea una tarea programada que lanza el CLI con los `args` dados.
 
     Devuelve True si la creación tuvo éxito.
     """
@@ -107,8 +106,8 @@ def crear_tarea(
         return False
 
     nombre_completo = f"{PREFIX}{nombre}" if not nombre.startswith(PREFIX) else nombre
-    programa, args = construir_accion(macro, excel, ejecutable, extra_args)
-    tr = f'"{programa}" {args}'.strip()
+    programa, args_str = construir_accion(args, ejecutable)
+    tr = f'"{programa}" {args_str}'.strip()
 
     cmd = ["schtasks", "/Create", "/TN", nombre_completo, "/TR", tr, "/RL", "LIMITED", "/IT"]
     cmd.extend(frecuencia.to_schtasks_args())
