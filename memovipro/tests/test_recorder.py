@@ -9,10 +9,11 @@ from core.step_model import StepType
 
 
 def test_construir_macro_sin_resolver_genera_click_at_xy():
-    eventos = [EventoCrudo(tipo="click", x=100, y=200, button="Button.left")]
+    eventos = [EventoCrudo(tipo="click", x=100, y=200, button="left")]
     macro = Recorder.construir_macro(eventos, resolver_selectores=False)
     assert len(macro.pasos) == 1
     assert macro.pasos[0].tipo == StepType.CLICK_AT_XY
+    # Botón "left" (default) y double=False no se serializan en extra.
     assert macro.pasos[0].extra == {"x": 100, "y": 200}
 
 

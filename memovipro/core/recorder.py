@@ -39,6 +39,12 @@ from .step_model import Macro, Selector, Step, StepType
 # Teclas que no deben aparecer en la macro grabada (controles del propio recorder).
 TECLAS_IGNORADAS = {"f9"}
 
+# Detección de doble clic: dos clics del mismo botón en la misma posición
+# (con tolerancia DOUBLE_CLICK_RADIUS_PX) dentro de DOUBLE_CLICK_THRESHOLD_S
+# se fusionan en un único evento marcado como `double=True`.
+DOUBLE_CLICK_THRESHOLD_S = 0.5
+DOUBLE_CLICK_RADIUS_PX = 8
+
 
 @dataclass
 class _BufferTexto:
@@ -51,10 +57,21 @@ class EventoCrudo:
     tipo: str  # 'click' | 'type_text' | 'send_keys'
     x: int = 0
     y: int = 0
-    button: str = ""
+    button: str = "left"  # 'left' | 'right' | 'middle'
+    double: bool = False
     valor: str = ""
     descripcion: str = ""
-    timestamp: float = 0.0  # time.time() del evento, para calcular delays al reproducir
+    timestamp: float = 0.0
+
+
+def _button_corto(button) -> str:
+    """Normaliza un botón de pynput ('Button.left') a 'left'/'right'/'middle'."""
+    s = str(button).replace("Button.", "").lower().strip()
+    if "right" in s:
+        return "right"
+    if "middle" in s:
+        return "middle"
+    return "left"
 
 
 def _selector_desde_punto(x: int, y: int) -> tuple[Selector | None, str]:
@@ -164,12 +181,30 @@ class Recorder:
             return
         with self._lock:
             self._flush_text(force=True)
+            btn = _button_corto(button)
+            ahora = time.time()
+            # ¿Es la segunda mitad de un doble clic?
+            if self.eventos_crudos:
+                ultimo = self.eventos_crudos[-1]
+                if (
+                    ultimo.tipo == "click"
+                    and not ultimo.double
+                    and ultimo.button == btn
+                    and (ahora - ultimo.timestamp) < DOUBLE_CLICK_THRESHOLD_S
+                    and abs(ultimo.x - int(x)) <= DOUBLE_CLICK_RADIUS_PX
+                    and abs(ultimo.y - int(y)) <= DOUBLE_CLICK_RADIUS_PX
+                ):
+                    ultimo.double = True
+                    sufijo = "" if btn == "left" else f" [{btn}]"
+                    ultimo.descripcion = f"Doble click ({ultimo.x},{ultimo.y}){sufijo}"
+                    return
+            sufijo = "" if btn == "left" else f" [{btn}]"
             self.eventos_crudos.append(EventoCrudo(
                 tipo="click",
                 x=int(x), y=int(y),
-                button=str(button),
-                descripcion=f"Click ({x},{y})",
-                timestamp=time.time(),
+                button=btn,
+                descripcion=f"Click ({x},{y}){sufijo}",
+                timestamp=ahora,
             ))
 
     def _on_press(self, key):
@@ -269,22 +304,32 @@ class Recorder:
                 desc = evt.descripcion
                 if resolver_selectores:
                     sel, desc = _selector_desde_punto(evt.x, evt.y)
+                # Prefijo y sufijo según botón y doble
+                accion = "Doble click" if evt.double else "Click"
+                btn_suffix = "" if evt.button == "left" else f" [{evt.button}]"
                 if sel is not None:
+                    extra: dict = {"fallback_xy": [evt.x, evt.y]}
+                    if evt.button != "left":
+                        extra["button"] = evt.button
+                    if evt.double:
+                        extra["double"] = True
                     pasos.append(Step(
                         tipo=StepType.CLICK_CONTROL,
                         selector=sel,
-                        descripcion=f"Click en {desc}",
+                        descripcion=f"{accion} en {desc}{btn_suffix}",
                         delay_before_s=delay,
-                        # Guardamos coordenadas originales como fallback:
-                        # si el selector simbólico no se resuelve al reproducir,
-                        # el player hace click_at_xy en estas coordenadas.
-                        extra={"fallback_xy": [evt.x, evt.y]},
+                        extra=extra,
                     ))
                 else:
+                    extra = {"x": evt.x, "y": evt.y}
+                    if evt.button != "left":
+                        extra["button"] = evt.button
+                    if evt.double:
+                        extra["double"] = True
                     pasos.append(Step(
                         tipo=StepType.CLICK_AT_XY,
-                        extra={"x": evt.x, "y": evt.y},
-                        descripcion=f"Click en ({evt.x},{evt.y}) — sin selector",
+                        extra=extra,
+                        descripcion=f"{accion} en ({evt.x},{evt.y}){btn_suffix} — sin selector",
                         delay_before_s=delay,
                     ))
                 if on_progress is not None:

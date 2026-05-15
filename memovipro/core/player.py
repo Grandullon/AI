@@ -179,8 +179,11 @@ class Player:
             self._click_control(paso)
             return
         if tipo == StepType.CLICK_AT_XY:
-            x, y = int(paso.extra.get("x", 0)), int(paso.extra.get("y", 0))
-            self._click_xy(x, y)
+            extra = paso.extra or {}
+            x, y = int(extra.get("x", 0)), int(extra.get("y", 0))
+            button = str(extra.get("button", "left"))
+            double = bool(extra.get("double", False))
+            self._click_xy(x, y, button=button, double=double)
             return
         if tipo == StepType.TYPE_TEXT:
             self._type_text(paso)
@@ -282,33 +285,30 @@ class Player:
         2. Si no, o si la resolución falla, ir a `fallback_xy` (las
            coordenadas exactas que se grabaron).
         3. Si no hay ni una cosa ni la otra, lanzar excepción.
+
+        Honra `extra.button` ('left' / 'right' / 'middle') y
+        `extra.double` (bool) para reproducir el clic exacto que se
+        capturó: doble clic, clic derecho, etc.
         """
-        sel = paso.selector
-        fallback = paso.extra.get("fallback_xy") if paso.extra else None
+        extra = paso.extra or {}
+        fallback = extra.get("fallback_xy")
+        button = str(extra.get("button", "left"))
+        double = bool(extra.get("double", False))
 
         # Sin ventana_principal: ir directo a coordenadas si las tenemos.
         # Es más rápido y fiable que iterar todas las ventanas con UIA.
         if not self.macro.ventana_principal and fallback and len(fallback) == 2:
             x, y = int(fallback[0]), int(fallback[1])
-            if self.dry_run:
-                logger.info("[dry-run] click_at_xy → ({}, {})", x, y)
-                time.sleep(0.2)
-                return
-            self._click_xy(x, y)
+            self._click_xy(x, y, button=button, double=double)
             return
 
-        # Caso normal: hay ventana_principal o no hay fallback. Resolver selector.
         try:
             ctrl = self._resolve_control(paso)
         except Exception as exc:
             if fallback and len(fallback) == 2:
                 x, y = int(fallback[0]), int(fallback[1])
                 logger.warning("Selector no resuelto, fallback a ({},{}): {}", x, y, exc)
-                if self.dry_run:
-                    logger.info("[dry-run] click_at_xy fallback → ({}, {})", x, y)
-                    time.sleep(0.2)
-                    return
-                self._click_xy(x, y)
+                self._click_xy(x, y, button=button, double=double)
                 return
             raise
         if self.dry_run:
@@ -316,17 +316,32 @@ class Player:
                 ctrl.draw_outline(colour="red", thickness=3)
             except Exception:
                 pass
-            logger.info("[dry-run] click_control → {}", paso.descripcion or paso.selector)
+            logger.info(
+                "[dry-run] {} {} → {}",
+                "double_click_input" if double else "click_input",
+                f"button={button}",
+                paso.descripcion or paso.selector,
+            )
             time.sleep(0.4)
             return
-        ctrl.click_input()
+        if double:
+            ctrl.double_click_input(button=button)
+        else:
+            ctrl.click_input(button=button)
 
-    def _click_xy(self, x: int, y: int) -> None:
+    def _click_xy(self, x: int, y: int, button: str = "left", double: bool = False) -> None:
         if self.dry_run:
-            logger.info("[dry-run] click_at_xy → ({}, {})", x, y)
+            logger.info(
+                "[dry-run] {} at ({}, {}) [button={}]",
+                "double_click" if double else "click", x, y, button,
+            )
+            time.sleep(0.2)
             return
         from pywinauto import mouse
-        mouse.click(coords=(x, y))
+        if double:
+            mouse.double_click(button=button, coords=(x, y))
+        else:
+            mouse.click(button=button, coords=(x, y))
 
     def _type_text(self, paso: Step) -> None:
         if paso.selector and not paso.selector.is_empty():
