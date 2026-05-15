@@ -54,15 +54,25 @@ class _BufferTexto:
 
 @dataclass
 class EventoCrudo:
-    tipo: str  # 'click' | 'type_text' | 'send_keys'
+    tipo: str  # 'click' | 'type_text' | 'send_keys' | 'scroll' | 'drag'
     x: int = 0
     y: int = 0
+    x2: int = 0  # destino del drag
+    y2: int = 0
+    dx: int = 0  # desplazamiento de rueda horizontal
+    dy: int = 0  # desplazamiento de rueda vertical (positivo = arriba)
     button: str = "left"  # 'left' | 'right' | 'middle'
     double: bool = False
     modifiers: str = ""  # ej. "ctrl" | "ctrl+shift" | "" (sin modificadores)
     valor: str = ""
     descripcion: str = ""
     timestamp: float = 0.0
+
+
+# Distancia mínima en píxeles para considerar que un press+release es un drag,
+# no un click. Por debajo se trata como click (con tolerancia para "manos
+# inestables" al hacer doble clic, p.ej.).
+DRAG_DIST_THRESHOLD_PX = 8
 
 
 def _button_corto(button) -> str:
@@ -173,6 +183,8 @@ class Recorder:
         # _on_press y se vacía en _on_release. Los clics y las teclas
         # con Ctrl/Alt activo lo consultan para etiquetarse.
         self._modifiers: set[str] = set()
+        # Press de ratón pendiente de release (para detectar drag).
+        self._press_pendiente: dict | None = None
 
     # Propiedad usada por la GUI para el contador en vivo.
     @property
@@ -186,7 +198,11 @@ class Recorder:
         self.eventos_crudos = []
         self._buf = _BufferTexto()
         self._modifiers = set()
-        self._mouse_listener = mouse.Listener(on_click=self._on_click)
+        self._press_pendiente = None
+        self._mouse_listener = mouse.Listener(
+            on_click=self._on_click,
+            on_scroll=self._on_scroll,
+        )
         self._kb_listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
         self._mouse_listener.start()
         self._kb_listener.start()
@@ -221,38 +237,108 @@ class Recorder:
 
     # ---- Callbacks ----
     def _on_click(self, x, y, button, pressed):
-        if not self._grabando or not pressed:
+        """Maneja press y release del ratón.
+
+        En el press guardamos la posición y el botón en `_press_pendiente`.
+        En el release decidimos si fue un click (release cerca del press)
+        o un drag (release significativamente lejos del press).
+        """
+        if not self._grabando:
+            return
+        btn = _button_corto(button)
+        if pressed:
+            with self._lock:
+                self._press_pendiente = {
+                    "x": int(x), "y": int(y),
+                    "button": btn,
+                    "modifiers": _modifiers_str(self._modifiers),
+                    "timestamp": time.time(),
+                }
+            return
+        # ----- Release -----
+        with self._lock:
+            pendiente = self._press_pendiente
+            self._press_pendiente = None
+            if pendiente is None or pendiente["button"] != btn:
+                return  # release huérfano: ignorar
+            self._flush_text(force=True)
+            dx_abs = abs(int(x) - pendiente["x"])
+            dy_abs = abs(int(y) - pendiente["y"])
+            if dx_abs > DRAG_DIST_THRESHOLD_PX or dy_abs > DRAG_DIST_THRESHOLD_PX:
+                # Es un drag (arrastrar).
+                self._emitir_drag(pendiente, int(x), int(y))
+            else:
+                # Click normal. Usamos la posición del press (más natural;
+                # un usuario que mueve 2-3 px sin querer no debe cambiar
+                # el objetivo).
+                self._emitir_click(pendiente)
+
+    def _emitir_click(self, pendiente: dict) -> None:
+        """Emite un click. Asume _lock ya adquirido por el caller."""
+        ahora = pendiente["timestamp"]  # usamos timestamp del press
+        btn = pendiente["button"]
+        mods = pendiente["modifiers"]
+        x = pendiente["x"]
+        y = pendiente["y"]
+        # ¿Es la segunda mitad de un doble clic? (modificadores y botón coinciden)
+        if self.eventos_crudos:
+            ultimo = self.eventos_crudos[-1]
+            if (
+                ultimo.tipo == "click"
+                and not ultimo.double
+                and ultimo.button == btn
+                and ultimo.modifiers == mods
+                and (ahora - ultimo.timestamp) < DOUBLE_CLICK_THRESHOLD_S
+                and abs(ultimo.x - x) <= DOUBLE_CLICK_RADIUS_PX
+                and abs(ultimo.y - y) <= DOUBLE_CLICK_RADIUS_PX
+            ):
+                ultimo.double = True
+                ultimo.descripcion = self._descripcion_click(ultimo.x, ultimo.y, btn, mods, double=True)
+                return
+        self.eventos_crudos.append(EventoCrudo(
+            tipo="click",
+            x=x, y=y,
+            button=btn,
+            modifiers=mods,
+            descripcion=self._descripcion_click(x, y, btn, mods, double=False),
+            timestamp=ahora,
+        ))
+
+    def _emitir_drag(self, pendiente: dict, x_release: int, y_release: int) -> None:
+        """Emite un drag de (press.x, press.y) a (release.x, release.y)."""
+        mods_label = pendiente["modifiers"].upper() + " " if pendiente["modifiers"] else ""
+        btn_suffix = "" if pendiente["button"] == "left" else f" [{pendiente['button']}]"
+        desc = (
+            f"{mods_label}Drag {pendiente['x']},{pendiente['y']} → "
+            f"{x_release},{y_release}{btn_suffix}"
+        )
+        self.eventos_crudos.append(EventoCrudo(
+            tipo="drag",
+            x=pendiente["x"], y=pendiente["y"],
+            x2=x_release, y2=y_release,
+            button=pendiente["button"],
+            modifiers=pendiente["modifiers"],
+            descripcion=desc,
+            timestamp=pendiente["timestamp"],
+        ))
+
+    def _on_scroll(self, x, y, dx, dy):
+        """Captura la rueda del ratón. Cada notch es un evento independiente."""
+        if not self._grabando:
             return
         with self._lock:
             self._flush_text(force=True)
-            btn = _button_corto(button)
-            ahora = time.time()
-            mods_str = _modifiers_str(self._modifiers)
-            # ¿Es la segunda mitad de un doble clic? Solo si los modificadores
-            # coinciden (Ctrl+Click y Click siguiente NO son doble clic).
-            if self.eventos_crudos:
-                ultimo = self.eventos_crudos[-1]
-                if (
-                    ultimo.tipo == "click"
-                    and not ultimo.double
-                    and ultimo.button == btn
-                    and ultimo.modifiers == mods_str
-                    and (ahora - ultimo.timestamp) < DOUBLE_CLICK_THRESHOLD_S
-                    and abs(ultimo.x - int(x)) <= DOUBLE_CLICK_RADIUS_PX
-                    and abs(ultimo.y - int(y)) <= DOUBLE_CLICK_RADIUS_PX
-                ):
-                    ultimo.double = True
-                    ultimo.descripcion = self._descripcion_click(
-                        ultimo.x, ultimo.y, btn, mods_str, double=True,
-                    )
-                    return
+            mods = _modifiers_str(self._modifiers)
+            direccion = "↑" if dy > 0 else ("↓" if dy < 0 else ("→" if dx > 0 else "←"))
+            mods_label = mods.upper() + " " if mods else ""
+            desc = f"{mods_label}Scroll {direccion} ({x},{y})"
             self.eventos_crudos.append(EventoCrudo(
-                tipo="click",
+                tipo="scroll",
                 x=int(x), y=int(y),
-                button=btn,
-                modifiers=mods_str,
-                descripcion=self._descripcion_click(int(x), int(y), btn, mods_str, double=False),
-                timestamp=ahora,
+                dx=int(dx), dy=int(dy),
+                modifiers=mods,
+                descripcion=desc,
+                timestamp=time.time(),
             ))
 
     @staticmethod
@@ -438,6 +524,31 @@ class Recorder:
                 pasos.append(Step(
                     tipo=StepType.SEND_KEYS,
                     valor=evt.valor,
+                    descripcion=evt.descripcion,
+                    delay_before_s=delay,
+                ))
+            elif evt.tipo == "scroll":
+                extra: dict = {"x": evt.x, "y": evt.y, "dx": evt.dx, "dy": evt.dy}
+                if evt.modifiers:
+                    extra["modifiers"] = evt.modifiers
+                pasos.append(Step(
+                    tipo=StepType.SCROLL,
+                    extra=extra,
+                    descripcion=evt.descripcion,
+                    delay_before_s=delay,
+                ))
+            elif evt.tipo == "drag":
+                extra: dict = {
+                    "x1": evt.x, "y1": evt.y,
+                    "x2": evt.x2, "y2": evt.y2,
+                }
+                if evt.button != "left":
+                    extra["button"] = evt.button
+                if evt.modifiers:
+                    extra["modifiers"] = evt.modifiers
+                pasos.append(Step(
+                    tipo=StepType.DRAG,
+                    extra=extra,
                     descripcion=evt.descripcion,
                     delay_before_s=delay,
                 ))

@@ -240,7 +240,57 @@ class Player:
                 title_re=title_re, state=state, force=True, timeout_s=paso.timeout_s,
             )
             return
+        if tipo == StepType.SCROLL:
+            extra = paso.extra or {}
+            x, y = int(extra.get("x", 0)), int(extra.get("y", 0))
+            dx, dy = int(extra.get("dx", 0)), int(extra.get("dy", 0))
+            self._scroll_xy(x, y, dx, dy)
+            return
+        if tipo == StepType.DRAG:
+            extra = paso.extra or {}
+            x1, y1 = int(extra.get("x1", 0)), int(extra.get("y1", 0))
+            x2, y2 = int(extra.get("x2", 0)), int(extra.get("y2", 0))
+            button = str(extra.get("button", "left"))
+            self._drag_xy(x1, y1, x2, y2, button=button)
+            return
         raise ValueError(f"Tipo de paso no soportado: {tipo}")
+
+    def _scroll_xy(self, x: int, y: int, dx: int, dy: int) -> None:
+        if self.dry_run:
+            logger.info("[dry-run] scroll en ({}, {}) dx={} dy={}", x, y, dx, dy)
+            time.sleep(0.15)
+            return
+        from pywinauto import mouse
+        # pywinauto.mouse.scroll: wheel_dist positivo = arriba, negativo = abajo.
+        # Usamos dy como cantidad principal (vertical es 99% del scroll real).
+        wheel = dy if dy != 0 else dx
+        try:
+            mouse.scroll(coords=(x, y), wheel_dist=wheel)
+        except Exception as exc:
+            logger.warning("Fallo scroll en ({},{}): {}", x, y, exc)
+
+    def _drag_xy(self, x1: int, y1: int, x2: int, y2: int, button: str = "left") -> None:
+        if self.dry_run:
+            logger.info(
+                "[dry-run] drag de ({},{}) a ({},{}) [button={}]",
+                x1, y1, x2, y2, button,
+            )
+            time.sleep(0.3)
+            return
+        from pywinauto import mouse
+        try:
+            mouse.press(button=button, coords=(x1, y1))
+            time.sleep(0.05)
+            mouse.move(coords=(x2, y2))
+            time.sleep(0.05)
+            mouse.release(button=button, coords=(x2, y2))
+        except Exception as exc:
+            logger.warning("Fallo drag de ({},{}) a ({},{}): {}", x1, y1, x2, y2, exc)
+            # Asegurar release si press tuvo éxito
+            try:
+                mouse.release(button=button, coords=(x2, y2))
+            except Exception:
+                pass
 
     def _asegurar_ventana_objetivo(
         self,

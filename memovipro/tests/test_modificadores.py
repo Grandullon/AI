@@ -65,13 +65,18 @@ class _FakeChar:
         return f"'{self.char}'"
 
 
+def _click_completo(rec, x, y, button="Button.left"):
+    rec._on_click(x, y, button, True)
+    rec._on_click(x, y, button, False)
+
+
 def test_ctrl_click_se_etiqueta_con_modifier(monkeypatch):
     rec = Recorder()
     rec._grabando = True
-    _set_time(monkeypatch, [100.0, 100.1])
+    _set_time(monkeypatch, [100.0])
 
     rec._on_press(_FakeCtrlKey("ctrl"))
-    rec._on_click(50, 60, "Button.left", True)
+    _click_completo(rec, 50, 60)
 
     assert len(rec.eventos_crudos) == 1
     evt = rec.eventos_crudos[0]
@@ -82,12 +87,12 @@ def test_ctrl_click_se_etiqueta_con_modifier(monkeypatch):
 def test_ctrl_release_quita_modifier(monkeypatch):
     rec = Recorder()
     rec._grabando = True
-    _set_time(monkeypatch, [100.0, 100.1, 100.2])
+    _set_time(monkeypatch, [100.0, 100.2])
 
     rec._on_press(_FakeCtrlKey("ctrl"))
-    rec._on_click(50, 60, "Button.left", True)
+    _click_completo(rec, 50, 60)
     rec._on_release(_FakeCtrlKey("ctrl"))
-    rec._on_click(70, 80, "Button.left", True)
+    _click_completo(rec, 70, 80)
 
     assert rec.eventos_crudos[0].modifiers == "ctrl"
     assert rec.eventos_crudos[1].modifiers == ""
@@ -126,12 +131,12 @@ def test_ctrl_click_no_se_funde_con_click_normal_como_doble(monkeypatch):
     """Ctrl+Click seguido de Click normal son DOS clicks, no un doble click."""
     rec = Recorder()
     rec._grabando = True
-    _set_time(monkeypatch, [100.0, 100.1, 100.15, 100.2])
+    _set_time(monkeypatch, [100.0, 100.2])
 
     rec._on_press(_FakeCtrlKey("ctrl"))
-    rec._on_click(50, 60, "Button.left", True)
+    _click_completo(rec, 50, 60)
     rec._on_release(_FakeCtrlKey("ctrl"))
-    rec._on_click(50, 60, "Button.left", True)
+    _click_completo(rec, 50, 60)
 
     assert len(rec.eventos_crudos) == 2
     assert all(not e.double for e in rec.eventos_crudos)
@@ -143,11 +148,11 @@ def test_multiples_ctrl_click_consecutivos(monkeypatch):
     """30 Ctrl+Click consecutivos: el caso real del usuario."""
     rec = Recorder()
     rec._grabando = True
-    _set_time(monkeypatch, [100.0 + i * 0.6 for i in range(33)])
+    _set_time(monkeypatch, [100.0 + i * 0.6 for i in range(30)])
 
     rec._on_press(_FakeCtrlKey("ctrl"))
     for i in range(30):
-        rec._on_click(100, 200 + i * 20, "Button.left", True)
+        _click_completo(rec, 100, 200 + i * 20)
     rec._on_release(_FakeCtrlKey("ctrl"))
 
     assert len(rec.eventos_crudos) == 30

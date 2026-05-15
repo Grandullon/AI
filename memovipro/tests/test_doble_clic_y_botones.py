@@ -22,14 +22,21 @@ def test_button_corto_normaliza_strings():
     assert _button_corto("Button.x1") == "left"  # desconocido → left por defecto
 
 
+def _click_completo(rec, x, y, button="Button.left"):
+    """Helper: emite press + release en (x, y). Necesario porque ahora el
+    Recorder solo genera evento al release, no al press."""
+    rec._on_click(x, y, button, True)
+    rec._on_click(x, y, button, False)
+
+
 def test_doble_click_se_fusiona_en_un_evento(monkeypatch):
     rec = Recorder()
     rec._grabando = True
     # Primer clic a t=100, segundo a t=100.2 (200 ms < 500 ms umbral)
     tiempos = iter([100.0, 100.2])
     monkeypatch.setattr("core.recorder.time.time", lambda: next(tiempos))
-    rec._on_click(50, 60, "Button.left", True)
-    rec._on_click(52, 61, "Button.left", True)
+    _click_completo(rec, 50, 60)
+    _click_completo(rec, 52, 61)
     assert len(rec.eventos_crudos) == 1
     evt = rec.eventos_crudos[0]
     assert evt.double is True
@@ -39,11 +46,10 @@ def test_doble_click_se_fusiona_en_un_evento(monkeypatch):
 def test_dos_clics_separados_no_se_fusionan(monkeypatch):
     rec = Recorder()
     rec._grabando = True
-    # 1 segundo entre clics → no es doble
     tiempos = iter([100.0, 101.0])
     monkeypatch.setattr("core.recorder.time.time", lambda: next(tiempos))
-    rec._on_click(50, 60, "Button.left", True)
-    rec._on_click(50, 60, "Button.left", True)
+    _click_completo(rec, 50, 60)
+    _click_completo(rec, 50, 60)
     assert len(rec.eventos_crudos) == 2
     assert all(not e.double for e in rec.eventos_crudos)
 
@@ -53,9 +59,10 @@ def test_dos_clics_lejos_no_se_fusionan(monkeypatch):
     rec._grabando = True
     tiempos = iter([100.0, 100.2])
     monkeypatch.setattr("core.recorder.time.time", lambda: next(tiempos))
-    rec._on_click(50, 60, "Button.left", True)
-    rec._on_click(200, 60, "Button.left", True)
-    # 150 px de distancia > 8 px umbral
+    _click_completo(rec, 50, 60)
+    _click_completo(rec, 200, 60)
+    # >8 px de distancia entre los DOS clics; cada uno es press+release en
+    # el mismo punto (no es drag).
     assert len(rec.eventos_crudos) == 2
     assert all(not e.double for e in rec.eventos_crudos)
 
@@ -65,8 +72,8 @@ def test_clic_derecho_seguido_no_se_funde_con_izquierdo(monkeypatch):
     rec._grabando = True
     tiempos = iter([100.0, 100.2])
     monkeypatch.setattr("core.recorder.time.time", lambda: next(tiempos))
-    rec._on_click(50, 60, "Button.left", True)
-    rec._on_click(50, 60, "Button.right", True)
+    _click_completo(rec, 50, 60, "Button.left")
+    _click_completo(rec, 50, 60, "Button.right")
     assert len(rec.eventos_crudos) == 2
     assert rec.eventos_crudos[0].button == "left"
     assert rec.eventos_crudos[1].button == "right"
@@ -91,9 +98,9 @@ def test_triple_click_resulta_en_doble_mas_simple(monkeypatch):
     rec._grabando = True
     tiempos = iter([100.0, 100.1, 100.2])
     monkeypatch.setattr("core.recorder.time.time", lambda: next(tiempos))
-    rec._on_click(50, 60, "Button.left", True)
-    rec._on_click(50, 60, "Button.left", True)  # → marca el anterior como doble
-    rec._on_click(50, 60, "Button.left", True)  # → tercer evento, no se fusiona (anterior ya es doble)
+    _click_completo(rec, 50, 60)  # → click simple
+    _click_completo(rec, 50, 60)  # → marca el anterior como doble
+    _click_completo(rec, 50, 60)  # → tercer evento, no se fusiona (anterior ya es doble)
     assert len(rec.eventos_crudos) == 2
     assert rec.eventos_crudos[0].double is True
     assert rec.eventos_crudos[1].double is False

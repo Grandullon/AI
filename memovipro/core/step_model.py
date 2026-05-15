@@ -24,6 +24,8 @@ class StepType(str, Enum):
     HANDLE_LIBREOFFICE_SAVE = "handle_libreoffice_save"
     CLOSE_WINDOW = "close_window"
     WINDOW_ENSURE = "window_ensure"  # Asegura ventana al frente + estado (max/normal/min)
+    SCROLL = "scroll"                # Rueda del ratón (vertical / horizontal)
+    DRAG = "drag"                    # Arrastrar de (x1,y1) a (x2,y2)
 
 
 @dataclass
