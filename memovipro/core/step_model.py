@@ -164,16 +164,42 @@ class Macro:
 
 
 _PLACEHOLDER_RE = re.compile(r"\{([A-Z_][A-Z0-9_]*)\}")
+_SECRET_RE = re.compile(r"\{SECRET:([A-Za-z_][A-Za-z0-9_\-]*)\}")
+
+
+def _resolve_secret(name: str) -> str:
+    """Resuelve un placeholder {SECRET:nombre} contra el almacén DPAPI/keyring.
+
+    Si no existe o el backend no está disponible, devuelve un marcador
+    visible para que el operador detecte el fallo en lugar de teclear
+    una cadena vacía.
+    """
+    try:
+        from .secrets import get_secret
+        v = get_secret(name)
+        if v is None:
+            return f"<<SECRET_NOT_FOUND:{name}>>"
+        return v
+    except Exception:
+        return f"<<SECRET_ERROR:{name}>>"
 
 
 def render_placeholders(text: str, ctx: dict[str, str]) -> str:
-    """Sustituye {DNI}, {YYYYMMDD}, {HHMMSS}, {NOMBRE_OPERADOR}... en una cadena.
+    """Sustituye {DNI}, {YYYYMMDD}, ... y {SECRET:nombre} en una cadena.
 
     Placeholders auto-resueltos si no están en ctx:
         YYYYMMDD, YYYY, MM, DD, HHMMSS, HH, MM_TIME, SS
+
+    Placeholders especiales:
+        {SECRET:nombre} → valor desde el almacén nativo (DPAPI/Keychain)
     """
     if text is None:
         return text
+
+    # 1. Secretos primero (no aparecen en logs porque el log usa la versión sin renderizar)
+    text = _SECRET_RE.sub(lambda m: _resolve_secret(m.group(1)), text)
+
+    # 2. Placeholders normales
     now = datetime.now()
     auto = {
         "YYYYMMDD": now.strftime("%Y%m%d"),
