@@ -2,12 +2,14 @@
 
 Flujo:
 1. Countdown 3-2-1 para que el usuario cambie de ventana.
-2. Inicia el grabador (captura cruda y rápida; sin pywinauto durante la
-   grabación, así el usuario no nota retardo entre clics).
-3. F9 global o botón "Detener" para finalizar.
-4. La resolución de selectores (lenta) corre en un QThread aparte —
-   la GUI sigue viva mostrando "Procesando paso X/Y".
-5. Cuando termina, emite la `Macro` resultante.
+2. La ventana grande del diálogo se oculta y aparece un panel flotante
+   compacto (estilo UiPath Studio Robot) en una esquina, siempre encima.
+   La ventana principal de MemoviPro se minimiza para no estorbar.
+3. Inicia el grabador (captura cruda y rápida).
+4. F9 global o botón "Parar" del panel flotante para finalizar.
+5. La resolución de selectores (lenta) corre en un QThread aparte —
+   la ventana sigue viva mostrando "Procesando paso X/Y".
+6. Cuando termina, emite la `Macro` resultante y restaura MemoviPro.
 """
 from __future__ import annotations
 
@@ -25,6 +27,8 @@ from PyQt6.QtWidgets import (
 
 from core.recorder import EventoCrudo, Recorder
 from core.step_model import Macro
+
+from .control_window import ControlWindow
 
 try:
     from pynput import keyboard as _pynput_keyboard
@@ -79,6 +83,8 @@ class RecordDialog(QDialog):
         self._countdown_left = COUNTDOWN_SECS
         self._counter_steps = 0
         self._worker: Optional[_ResolveWorker] = None
+        self._control: Optional[ControlWindow] = None
+        self._main_window_was_visible = True
 
         layout = QVBoxLayout(self)
         self.estado = QLabel(f"La grabación empezará en {COUNTDOWN_SECS}…")
@@ -146,6 +152,23 @@ class RecordDialog(QDialog):
         self._update_timer.start(300)
         self._start_hotkey()
 
+        # Reemplazar el diálogo gordo por el panel compacto y minimizar
+        # MemoviPro para no estorbar a la app que se está grabando.
+        self._control = ControlWindow(parent=None)
+        self._control.set_title("🔴 GRABANDO", "Pulsa F9 o el botón Parar para terminar")
+        self._control.set_action("0 acciones capturadas")
+        self._control.hide_progress()
+        self._control.pause_btn.setVisible(False)  # no se pausa la grabación
+        self._control.stop_requested.connect(self._stop)
+        self._control.show_in_corner()
+
+        self.hide()  # ocultamos el diálogo grande con countdown
+        parent = self.parent()
+        main_win = parent.window() if parent is not None else None
+        if main_win is not None:
+            self._main_window_was_visible = main_win.isVisible()
+            main_win.showMinimized()
+
     def _tick_update(self):
         if self._recorder is None:
             return
@@ -153,6 +176,8 @@ class RecordDialog(QDialog):
         if n != self._counter_steps:
             self._counter_steps = n
             self.contador.setText(f"{n} acciones capturadas")
+            if self._control is not None:
+                self._control.set_action(f"{n} acciones capturadas")
 
     def _start_hotkey(self):
         if not _HAS_PYNPUT:
@@ -208,6 +233,11 @@ class RecordDialog(QDialog):
         self.progress.setVisible(True)
         self.progress.setRange(0, 0)  # indeterminado hasta que llegue el primer progreso
 
+        if self._control is not None:
+            self._control.set_title("⏳ Procesando…", "Resolviendo selectores")
+            self._control.show_progress()
+            self._control.set_progress(0, 1)
+
         # La parte lenta corre en un hilo aparte para no bloquear la GUI.
         self._worker = _ResolveWorker(self._recorder, resolver_selectores=True)
         self._worker.progress.connect(self._on_progress)
@@ -219,15 +249,18 @@ class RecordDialog(QDialog):
             self.progress.setRange(0, total)
             self.progress.setValue(i)
             self.estado.setText(f"⏳ Resolviendo selector {i}/{total}…")
+            if self._control is not None:
+                self._control.set_progress(i, total)
+                self._control.set_action(f"Selector {i}/{total}")
 
     def _on_macro_ready(self, macro):
         self._recorder = None
         if macro is None:
             macro = Macro(nombre="grabacion")
         self.macro = macro
-        # Cerramos el diálogo (que tiene WindowStaysOnTopHint) ANTES de
-        # emitir la señal. Si el padre va a abrir un QMessageBox modal,
-        # no queremos que quede oculto detrás de este diálogo.
+        # Restaurar MemoviPro y cerrar el panel flotante antes de emitir,
+        # para que cualquier QMessageBox del padre quede al frente.
+        self._restaurar_ventanas()
         self.accept()
         self.macro_capturada.emit(self.macro)
 
@@ -235,6 +268,7 @@ class RecordDialog(QDialog):
         self._countdown_timer.stop()
         self._update_timer.stop()
         self._stop_hotkey_async()
+        self._restaurar_ventanas()
         if self._worker is not None and self._worker.isRunning():
             # Si el worker está corriendo, dejamos que termine; cerramos diálogo.
             self.reject()
@@ -246,6 +280,25 @@ class RecordDialog(QDialog):
                 pass
             self._recorder = None
         self.reject()
+
+    def _restaurar_ventanas(self):
+        """Cierra el panel flotante y restaura MemoviPro."""
+        if self._control is not None:
+            try:
+                self._control.close()
+                self._control.deleteLater()
+            except Exception:
+                pass
+            self._control = None
+        parent = self.parent()
+        main_win = parent.window() if parent is not None else None
+        if main_win is not None and self._main_window_was_visible:
+            try:
+                main_win.showNormal()
+                main_win.raise_()
+                main_win.activateWindow()
+            except Exception:
+                pass
 
     def closeEvent(self, event):
         self._cancelar()
