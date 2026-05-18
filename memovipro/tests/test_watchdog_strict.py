@@ -45,8 +45,9 @@ def test_ventana_app_legitima_no_es_popup():
     assert _es_popup_candidato(win, ignorar=[]) is False
 
 
-def test_dialogo_nativo_si_es_popup():
-    win = _FakeWindow(title="Mensaje", class_name="#32770", w=300, h=150)
+def test_dialogo_nativo_con_keyword_error_si_es_popup():
+    """#32770 + título con keyword de error = popup."""
+    win = _FakeWindow(title="Error del sistema", class_name="#32770", w=300, h=150)
     assert _es_popup_candidato(win, ignorar=[]) is True
 
 
@@ -75,6 +76,55 @@ def test_ventana_invisible_no_es_popup():
 def test_titulo_en_lista_ignorar_no_es_popup():
     win = _FakeWindow(title="Error de prueba", class_name="#32770")
     assert _es_popup_candidato(win, ignorar=["Error de prueba"]) is False
+
+
+# ===== Lista blanca de diálogos legítimos del SO =====
+# Estos diálogos usan class #32770 pero NO son popups de error;
+# la macro suele necesitar interactuar con ellos.
+
+def test_dialogo_abrir_no_es_popup():
+    """El diálogo "Abrir" de Windows para seleccionar fichero."""
+    win = _FakeWindow(title="Abrir", class_name="#32770", w=600, h=450)
+    assert _es_popup_candidato(win, ignorar=[]) is False
+
+
+def test_dialogo_guardar_como_no_es_popup():
+    win = _FakeWindow(title="Guardar como", class_name="#32770", w=600, h=450)
+    assert _es_popup_candidato(win, ignorar=[]) is False
+
+
+def test_dialogo_imprimir_no_es_popup():
+    win = _FakeWindow(title="Imprimir", class_name="#32770", w=600, h=500)
+    assert _es_popup_candidato(win, ignorar=[]) is False
+
+
+def test_dialogo_examinar_carpeta_no_es_popup():
+    win = _FakeWindow(title="Examinar", class_name="#32770", w=400, h=300)
+    assert _es_popup_candidato(win, ignorar=[]) is False
+
+
+def test_dialogo_save_as_en_ingles_no_es_popup():
+    win = _FakeWindow(title="Save As", class_name="#32770", w=600, h=450)
+    assert _es_popup_candidato(win, ignorar=[]) is False
+
+
+def test_dialogo_abrir_con_sufijo_no_es_popup():
+    """'Abrir: pa-diario.fic' — sigue siendo el diálogo de abrir."""
+    win = _FakeWindow(title="Abrir: pa-diario.fic", class_name="#32770", w=600, h=450)
+    assert _es_popup_candidato(win, ignorar=[]) is False
+
+
+def test_dialogo_error_sigue_siendo_popup_pese_a_ser_32770():
+    """No queremos que la lista blanca silencie todos los #32770.
+    Si el título tiene keyword de error, SÍ es popup."""
+    win = _FakeWindow(title="Error al guardar", class_name="#32770", w=400, h=200)
+    assert _es_popup_candidato(win, ignorar=[]) is True
+
+
+def test_dialogo_32770_sin_keyword_de_error_no_es_popup():
+    """Por defecto un #32770 sin 'Error/Aviso/...' tampoco lo es."""
+    win = _FakeWindow(title="Ventana cualquiera", class_name="#32770", w=400, h=200)
+    assert _es_popup_candidato(win, ignorar=[]) is False
 
 
 def test_player_sin_ventana_principal_usa_fallback_xy():
