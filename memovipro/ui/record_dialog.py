@@ -25,6 +25,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from loguru import logger
+
 from core.recorder import EventoCrudo, Recorder
 from core.step_model import Macro
 
@@ -54,12 +56,19 @@ class _ResolveWorker(QThread):
     def run(self):
         try:
             eventos = self.recorder.stop()
+            logger.info("Recorder.stop devolvió {} eventos crudos", len(eventos))
             macro = Recorder.construir_macro(
                 eventos,
                 resolver_selectores=self.resolver_selectores,
                 on_progress=lambda i, total: self.progress.emit(i, total),
             )
+            logger.info(
+                "construir_macro: {} pasos resultantes (resolver_selectores={})",
+                len(macro.pasos) if macro else 0,
+                self.resolver_selectores,
+            )
         except Exception:
+            logger.exception("Error en _ResolveWorker.run")
             macro = None
         self.finished_macro.emit(macro)
 
@@ -163,6 +172,14 @@ class RecordDialog(QDialog):
         self._control.show_in_corner()
 
         self.hide()  # ocultamos el diálogo grande con countdown
+        # PROBLEMA: hide() interfiere con la captura de pynput o el
+        # bucle modal de exec(). Síntoma: F9 detiene pero nada queda
+        # grabado. Workaround: mover el diálogo fuera de pantalla y
+        # achicarlo a 1×1, así Qt lo considera "vivo" y el modal sigue
+        # funcionando, pero el usuario solo ve el panel flotante.
+        self.resize(1, 1)
+        self.move(-30000, -30000)
+        self.show()
         parent = self.parent()
         main_win = parent.window() if parent is not None else None
         if main_win is not None:

@@ -33,6 +33,16 @@ try:
 except Exception:
     _HAS_PYWINAUTO = False
 
+try:
+    from loguru import logger
+except Exception:
+    class _NullLogger:
+        def debug(self, *a, **kw): pass
+        def info(self, *a, **kw): pass
+        def warning(self, *a, **kw): pass
+        def exception(self, *a, **kw): pass
+    logger = _NullLogger()
+
 from .step_model import Macro, Selector, Step, StepType
 
 
@@ -206,6 +216,7 @@ class Recorder:
         self._kb_listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
         self._mouse_listener.start()
         self._kb_listener.start()
+        logger.info("Recorder.start · listeners pynput arrancados")
 
     def stop(self) -> list[EventoCrudo]:
         """Detiene los listeners y devuelve los eventos crudos.
@@ -233,6 +244,15 @@ class Recorder:
         self._kb_listener = None
         with self._lock:
             self._flush_text(force=True)
+        logger.info(
+            "Recorder.stop · {} eventos crudos capturados (clicks={}, type_text={}, send_keys={}, scroll={}, drag={})",
+            len(self.eventos_crudos),
+            sum(1 for e in self.eventos_crudos if e.tipo == "click"),
+            sum(1 for e in self.eventos_crudos if e.tipo == "type_text"),
+            sum(1 for e in self.eventos_crudos if e.tipo == "send_keys"),
+            sum(1 for e in self.eventos_crudos if e.tipo == "scroll"),
+            sum(1 for e in self.eventos_crudos if e.tipo == "drag"),
+        )
         return list(self.eventos_crudos)
 
     # ---- Callbacks ----
