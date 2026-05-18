@@ -58,22 +58,20 @@ def test_ocultar_consola_con_quiet_no_peta_fuera_de_windows(monkeypatch):
 
 # ---- Schedule panel añade --quiet automáticamente ----
 
-def test_schedule_panel_replay_incluye_quiet():
+def test_schedule_panel_args_incluye_quiet():
     """Inspección estática: el módulo schedule_panel debe insertar
-    --quiet en las dos rutas de construcción de args. Leemos el
+    --quiet en los args generados para cualquier modo. Leemos el
     fichero directamente para no tener que importar PyQt6."""
     panel_path = ROOT / "ui" / "schedule_panel.py"
     src = panel_path.read_text(encoding="utf-8")
-    # Extraer cada función y verificar que contiene "--quiet"
-    for nombre_func in ("_args_silencioso", "_args_para_modo_actual"):
-        idx = src.find(f"def {nombre_func}")
-        assert idx >= 0, f"No encuentro {nombre_func}"
-        # Tomamos un bloque generoso de 3000 chars desde la firma
-        bloque = src[idx:idx + 3000]
-        # Y cortamos en la siguiente función (o final)
-        next_def = bloque.find("\n    def ", 10)
-        if next_def > 0:
-            bloque = bloque[:next_def]
-        assert '"--quiet"' in bloque, (
-            f"{nombre_func} debería incluir '--quiet' en sus args"
-        )
+    # _args es el método unificado tras el refactor
+    idx = src.find("def _args(")
+    assert idx >= 0, "No encuentro _args"
+    bloque = src[idx:idx + 5000]
+    next_def = bloque.find("\n    def ", 10)
+    if next_def > 0:
+        bloque = bloque[:next_def]
+    # Debe aparecer --quiet en las tres ramas (REPLAY, PIPELINE, DNI)
+    assert bloque.count('"--quiet"') >= 3, (
+        "_args debería incluir '--quiet' en las tres ramas (replay, pipeline, dni)"
+    )

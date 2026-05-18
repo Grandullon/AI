@@ -30,6 +30,19 @@ class TareaProgramada:
     proximo: str
     estado: str
     accion: str = ""
+    ultima_ejecucion: str = ""
+    ultimo_resultado: str = ""
+
+    @property
+    def ok_ultima_ejecucion(self) -> bool | None:
+        """True si último resultado=0, False si !=0, None si no se conoce."""
+        s = (self.ultimo_resultado or "").strip()
+        if not s or s.upper() == "N/A":
+            return None
+        try:
+            return int(s, 0) == 0
+        except (ValueError, TypeError):
+            return None
 
 
 @dataclass
@@ -150,6 +163,87 @@ def crear_tarea(
     return False
 
 
+def ejecutar_ahora(nombre: str) -> tuple[bool, str]:
+    """Lanza la tarea inmediatamente con `schtasks /Run`.
+
+    Devuelve (éxito, mensaje). El mensaje es útil para mostrar el error
+    en la GUI si la tarea no se pudo ejecutar (no existe, sin permisos,
+    etc.).
+    """
+    if not _es_windows():
+        return False, "Solo disponible en Windows"
+    nombre_completo = f"{PREFIX}{nombre}" if not nombre.startswith(PREFIX) else nombre
+    res = _correr(["schtasks", "/Run", "/TN", nombre_completo])
+    if res.returncode == 0:
+        return True, f"Tarea '{nombre_completo}' lanzada"
+    return False, (res.stderr.strip() or res.stdout.strip() or "schtasks falló")
+
+
+def habilitar_tarea(nombre: str, habilitar: bool = True) -> bool:
+    if not _es_windows():
+        return False
+    nombre_completo = f"{PREFIX}{nombre}" if not nombre.startswith(PREFIX) else nombre
+    flag = "/ENABLE" if habilitar else "/DISABLE"
+    res = _correr(["schtasks", "/Change", "/TN", nombre_completo, flag])
+    return res.returncode == 0
+
+
+def validar_args(
+    args: list[str],
+    macros_dir: Path,
+    pipelines_dir: Path,
+) -> list[str]:
+    """Devuelve una lista de errores (vacía si todo bien).
+
+    Comprueba que la macro / pipeline / Excel referidos en `args` existen
+    realmente en disco, para evitar crear tareas con referencias rotas.
+    """
+    errores: list[str] = []
+    args = list(args)
+
+    def _existe_macro(nombre: str) -> bool:
+        if not nombre:
+            return False
+        p = Path(nombre)
+        if p.is_file():
+            return True
+        for sufijo in (".yaml", ".yml"):
+            if (macros_dir / f"{nombre}{sufijo}").exists():
+                return True
+        return False
+
+    def _existe_pipeline(nombre: str) -> bool:
+        if not nombre:
+            return False
+        p = Path(nombre)
+        if p.is_file():
+            return True
+        for sufijo in (".yaml", ".yml"):
+            if (pipelines_dir / f"{nombre}{sufijo}").exists():
+                return True
+        return False
+
+    # Buscar cada flag y validar su valor
+    for i, a in enumerate(args):
+        if a in ("--macro", "--replay") and i + 1 < len(args):
+            nombre = args[i + 1]
+            if not _existe_macro(nombre):
+                errores.append(
+                    f"No se encuentra la macro '{nombre}' en {macros_dir}"
+                )
+        elif a == "--pipeline" and i + 1 < len(args):
+            nombre = args[i + 1]
+            if not _existe_pipeline(nombre):
+                errores.append(
+                    f"No se encuentra el pipeline '{nombre}' en {pipelines_dir}"
+                )
+        elif a == "--excel" and i + 1 < len(args):
+            excel = Path(args[i + 1])
+            if not excel.exists():
+                errores.append(f"No se encuentra el Excel: {excel}")
+    return errores
+
+
 def eliminar_tarea(nombre: str) -> bool:
     if not _es_windows():
         return False
@@ -207,27 +301,30 @@ def _parse_csv_tasks(text: str, delim: str) -> list[TareaProgramada]:
         if idx_nombre < 0:
             continue
         nombre = fila[idx_nombre].strip('"').strip().lstrip("\\")
-        proximo = ""
-        estado = ""
-        if len(fila) > idx_nombre + 1:
-            proximo = fila[idx_nombre + 1].strip('"').strip()
-        if len(fila) > idx_nombre + 2:
-            estado = fila[idx_nombre + 2].strip('"').strip()
-        # Task To Run suele estar 7 columnas después con /V. Lo buscamos
-        # como una columna que parezca una ruta o un ejecutable.
+        def _safe(i):
+            return fila[i].strip('"').strip() if 0 <= i < len(fila) else ""
+        # Con /V, las columnas relativas al TaskName son:
+        #   +1 Next Run Time, +2 Status, +3 Logon Mode,
+        #   +4 Last Run Time, +5 Last Result, +6 Author, +7 Task To Run
+        proximo = _safe(idx_nombre + 1)
+        estado = _safe(idx_nombre + 2)
+        ultima_ejecucion = _safe(idx_nombre + 4)
+        ultimo_resultado = _safe(idx_nombre + 5)
+        # Task To Run: buscamos columna que parezca una ruta/ejecutable.
         accion = ""
         for ofs in (7, 8, 6):
             i_acc = idx_nombre + ofs
-            if 0 <= i_acc < len(fila):
-                v = fila[i_acc].strip('"').strip()
-                if v and (".exe" in v.lower() or "\\" in v or "--" in v):
-                    accion = v
-                    break
+            v = _safe(i_acc)
+            if v and (".exe" in v.lower() or "\\" in v or "--" in v):
+                accion = v
+                break
         out.append(TareaProgramada(
             nombre=nombre,
             proximo=proximo,
             estado=estado,
             accion=accion,
+            ultima_ejecucion=ultima_ejecucion,
+            ultimo_resultado=ultimo_resultado,
         ))
     seen: set[str] = set()
     unicas: list[TareaProgramada] = []
