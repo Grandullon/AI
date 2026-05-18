@@ -174,37 +174,122 @@ def _detectar_delimiter(text: str) -> str:
     return ","
 
 
-def listar_tareas() -> list[TareaProgramada]:
-    """Devuelve solo las tareas creadas por MemoviPro (prefijo MemoviPro_)."""
-    if not _es_windows():
-        return []
-    res = _correr(["schtasks", "/Query", "/FO", "CSV", "/NH", "/V"])
-    if res.returncode != 0:
-        logger.warning("schtasks query devolvió {}", res.returncode)
-        return []
+def _parse_csv_tasks(text: str, delim: str) -> list[TareaProgramada]:
+    """Parsea la salida CSV de schtasks con el delimitador dado.
 
-    out: list[TareaProgramada] = []
+    Las columnas varían según la versión de Windows y si se usa /V o no:
+      - Sin /V: col 0 = TaskName, col 1 = NextRunTime, col 2 = Status
+      - Con /V: col 0 = HostName, col 1 = TaskName, col 2 = NextRunTime,
+                col 3 = Status, ..., col 8 = TaskToRun
+    Para ser inmunes a esa diferencia, escaneamos cada fila buscando
+    la columna cuyo valor empieza por `MemoviPro_` (o `\\MemoviPro_`).
+    Las siguientes dos columnas se toman como NextRunTime y Status.
+
+    Si el OTRO delimitador aparece dentro del valor, eso indica que
+    estamos parseando con el delimitador equivocado y descartamos esa
+    fila (típico fallo en Windows español donde schtasks emite `;`).
+    """
     import csv
     from io import StringIO
 
-    delim = _detectar_delimiter(res.stdout)
-    logger.debug("schtasks CSV delimiter detectado: {}", repr(delim))
-    reader = csv.reader(StringIO(res.stdout), delimiter=delim)
+    otro = ";" if delim == "," else ","
+    out: list[TareaProgramada] = []
+    reader = csv.reader(StringIO(text), delimiter=delim)
     for fila in reader:
-        if len(fila) < 2:
+        if not fila:
             continue
-        nombre = fila[0].strip('"').strip()
-        if not nombre.lstrip("\\").startswith(PREFIX) and PREFIX not in nombre:
+        idx_nombre = -1
+        for i, val in enumerate(fila):
+            v_norm = val.strip('"').strip().lstrip("\\")
+            if v_norm.startswith(PREFIX) and otro not in val:
+                idx_nombre = i
+                break
+        if idx_nombre < 0:
             continue
-        proximo = fila[2] if len(fila) > 2 else ""
-        estado = fila[3] if len(fila) > 3 else ""
-        accion = fila[8] if len(fila) > 8 else ""
+        nombre = fila[idx_nombre].strip('"').strip().lstrip("\\")
+        proximo = ""
+        estado = ""
+        if len(fila) > idx_nombre + 1:
+            proximo = fila[idx_nombre + 1].strip('"').strip()
+        if len(fila) > idx_nombre + 2:
+            estado = fila[idx_nombre + 2].strip('"').strip()
+        # Task To Run suele estar 7 columnas después con /V. Lo buscamos
+        # como una columna que parezca una ruta o un ejecutable.
+        accion = ""
+        for ofs in (7, 8, 6):
+            i_acc = idx_nombre + ofs
+            if 0 <= i_acc < len(fila):
+                v = fila[i_acc].strip('"').strip()
+                if v and (".exe" in v.lower() or "\\" in v or "--" in v):
+                    accion = v
+                    break
         out.append(TareaProgramada(
-            nombre=nombre.lstrip("\\"),
+            nombre=nombre,
             proximo=proximo,
             estado=estado,
             accion=accion,
         ))
+    seen: set[str] = set()
+    unicas: list[TareaProgramada] = []
+    for t in out:
+        if t.nombre in seen:
+            continue
+        seen.add(t.nombre)
+        unicas.append(t)
+    return unicas
+
+
+def _parse_list_tasks(text: str) -> list[TareaProgramada]:
+    """Parsea la salida `schtasks /FO LIST /V` como fallback.
+
+    Cada tarea es un bloque de líneas `Clave: Valor` separadas por
+    una línea en blanco. Funciona en cualquier locale: aunque las
+    claves estén traducidas ("Nombre de tarea" en vez de "TaskName"),
+    nos basta con encontrar UNA línea cuyo valor empiece por la
+    barra invertida `\\MemoviPro_…`.
+    """
+    out: list[TareaProgramada] = []
+    bloque: dict[str, str] = {}
+
+    def emitir():
+        # Buscamos cualquier línea cuyo valor pinta a nombre de tarea
+        # (`\MemoviPro_xxx`) y la usamos como nombre.
+        nombre = ""
+        proximo = ""
+        estado = ""
+        accion = ""
+        for clave, valor in bloque.items():
+            v = valor.strip()
+            v_norm = v.lstrip("\\")
+            cl = clave.strip().lower()
+            if not nombre and v_norm.startswith(PREFIX):
+                nombre = v_norm
+            elif "next" in cl or "próxima" in cl or "proxima" in cl:
+                proximo = v
+            elif cl in ("status", "estado"):
+                estado = v
+            elif "task to run" in cl or "tarea" in cl and "ejecutar" in cl:
+                accion = v
+        if nombre:
+            out.append(TareaProgramada(
+                nombre=nombre,
+                proximo=proximo,
+                estado=estado,
+                accion=accion,
+            ))
+
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            if bloque:
+                emitir()
+                bloque = {}
+            continue
+        if ":" in line:
+            k, _, v = line.partition(":")
+            bloque[k.strip()] = v.strip()
+    if bloque:
+        emitir()
 
     seen: set[str] = set()
     unicas: list[TareaProgramada] = []
@@ -214,3 +299,42 @@ def listar_tareas() -> list[TareaProgramada]:
         seen.add(t.nombre)
         unicas.append(t)
     return unicas
+
+
+def listar_tareas() -> list[TareaProgramada]:
+    """Devuelve solo las tareas con prefijo MemoviPro_.
+
+    Estrategia robusta multi-locale:
+      1. Pide schtasks /FO CSV /NH /V.
+      2. Prueba CSV con `,` Y con `;`. Se queda con la lista más larga.
+         (Windows en inglés usa `,`, español/francés/alemán usan `;`).
+      3. Si AMBAS dan 0, intenta /FO LIST /V que es resistente a la
+         localización porque va por bloques `Clave: Valor`.
+    """
+    if not _es_windows():
+        return []
+
+    res = _correr(["schtasks", "/Query", "/FO", "CSV", "/NH", "/V"])
+    if res.returncode == 0 and res.stdout:
+        with_comma = _parse_csv_tasks(res.stdout, ",")
+        with_semi = _parse_csv_tasks(res.stdout, ";")
+        logger.debug(
+            "listar_tareas CSV: coma={} semi={}",
+            len(with_comma), len(with_semi),
+        )
+        elegido = with_comma if len(with_comma) >= len(with_semi) else with_semi
+        if elegido:
+            return elegido
+
+    # Fallback: formato LIST (bloques Clave: Valor)
+    res2 = _correr(["schtasks", "/Query", "/FO", "LIST", "/V"])
+    if res2.returncode == 0 and res2.stdout:
+        lista = _parse_list_tasks(res2.stdout)
+        logger.debug("listar_tareas LIST: {}", len(lista))
+        return lista
+
+    logger.warning(
+        "listar_tareas no encontró tareas (rc_csv={} rc_list={})",
+        res.returncode, res2.returncode if 'res2' in locals() else "n/a",
+    )
+    return []
