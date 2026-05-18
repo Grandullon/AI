@@ -72,6 +72,14 @@ class ReplayRunner:
         if self._player:
             self._player.abort()
 
+    def pause(self) -> None:
+        if self._player:
+            self._player.pause()
+
+    def resume(self) -> None:
+        if self._player:
+            self._player.resume()
+
     def run(self) -> ReplaySummary:
         ok_list: list[int] = []
         ko_list: list[tuple[int, str]] = []

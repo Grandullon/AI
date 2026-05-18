@@ -75,9 +75,32 @@ class Player:
         # Ctrl/Shift/Alt presionado durante secuencias largas como
         # "Ctrl+Click en 30 elementos" sin soltarlo entre clic y clic.
         self._modifiers_held: set[str] = set()
+        # Pausa solicitada externamente (panel de control). El loop principal
+        # se queda esperando aquí sin avanzar.
+        self._paused = threading.Event()
 
     def abort(self) -> None:
         self._abort.set()
+        # Si está pausado, despertar para que vea el abort.
+        self._paused.clear()
+
+    def pause(self) -> None:
+        """Solicita pausa. El loop esperará antes del siguiente paso."""
+        self._paused.set()
+        logger.info("Player pausado")
+
+    def resume(self) -> None:
+        """Cancela la pausa."""
+        self._paused.clear()
+        logger.info("Player reanudado")
+
+    def is_paused(self) -> bool:
+        return self._paused.is_set()
+
+    def _esperar_si_pausado(self) -> None:
+        """Bloquea (con tramos cortos) mientras esté pausado."""
+        while self._paused.is_set() and not self._abort.is_set():
+            time.sleep(0.1)
 
     def _on_popup(self, evt: PopupEvent) -> None:
         with self._popup_lock:
@@ -114,6 +137,11 @@ class Player:
                 self._asegurar_ventana_objetivo(force=True)
 
             for idx, paso in enumerate(self.macro.pasos):
+                if self._abort.is_set():
+                    break
+                # Esperar si está en pausa (puede tardar mucho — el usuario
+                # se ha ido a tomar café entre paso y paso).
+                self._esperar_si_pausado()
                 if self._abort.is_set():
                     break
                 paso_render = render_step(paso, ctx)

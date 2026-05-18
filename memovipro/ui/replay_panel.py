@@ -28,8 +28,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.player import RunStatus
 from core.replay_runner import ReplayRunner, ReplaySummary
 from core.step_model import Macro
+
+from .control_window import ControlWindow
 
 
 VELOCIDADES = [
@@ -44,6 +47,7 @@ VELOCIDADES = [
 class _ReplayThread(QThread):
     log_line = pyqtSignal(str)
     progress = pyqtSignal(int, int)
+    step_status = pyqtSignal(object)  # RunStatus por cada paso ejecutado
     finished_summary = pyqtSignal(object)
     error = pyqtSignal(str)
 
@@ -59,9 +63,13 @@ class _ReplayThread(QThread):
             self.log_line.emit(f"  {marca}  iter {n:04d}   KO — {motivo}")
         self.progress.emit(n, self.runner.veces)
 
+    def _on_status(self, status: RunStatus):
+        self.step_status.emit(status)
+
     def run(self):
         try:
             self.runner.on_iter_done = self._on_iter_done
+            self.runner.on_status = self._on_status
             summary = self.runner.run()
             self.finished_summary.emit(summary)
         except Exception as exc:
@@ -185,6 +193,7 @@ class ReplayPanel(QWidget):
         self._thread = _ReplayThread(self._runner)
         self._thread.log_line.connect(self.log_view.append)
         self._thread.progress.connect(self._on_progress)
+        self._thread.step_status.connect(self._on_step_status)
         self._thread.finished_summary.connect(self._on_finished)
         self._thread.error.connect(self._on_error)
         self.log_view.append(
@@ -193,9 +202,63 @@ class ReplayPanel(QWidget):
         self.log_view.append(f"   Velocidad: {self.velocidad_combo.currentText()}")
         self.log_view.append(f"   Watchdog popups: {'ON' if watchdog else 'OFF'}")
         self.log_view.append("")
+
+        # Crear panel flotante de control y minimizar la ventana principal
+        # para que MemoviPro no estorbe a la aplicación que estamos automatizando.
+        self._control = ControlWindow(parent=None)
+        self._control.set_title(
+            f"▶ Reproduciendo {macro.nombre}",
+            f"Iteración 0/{veces} · {len(macro.pasos)} pasos por iteración",
+        )
+        self._control.set_progress(0, veces * max(1, len(macro.pasos)))
+        self._control.pause_toggled.connect(self._on_pause_toggled)
+        self._control.stop_requested.connect(self._on_stop_clicked)
+        self._control.show_in_corner()
+        self._total_pasos = veces * max(1, len(macro.pasos))
+        self._iter_actual = 0
+        self._macro_nombre = macro.nombre
+        self._veces = veces
+
+        main_win = self.window()
+        if main_win is not None:
+            main_win.showMinimized()
+
         self._thread.start()
         self.run_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
+
+    # ---- Callbacks del panel flotante ----
+    def _on_pause_toggled(self, paused: bool):
+        if self._runner is None:
+            return
+        if paused:
+            self._runner.pause()
+            self.log_view.append("⏸  Pausa solicitada")
+        else:
+            self._runner.resume()
+            self.log_view.append("▶  Reanudado")
+
+    def _on_stop_clicked(self):
+        self.abort()
+        self.log_view.append("⏹  Detenido desde el panel de control")
+
+    def _on_step_status(self, status: RunStatus):
+        if self._control is None:
+            return
+        # Estimar iteración por DNI ('iter_0001' → 1)
+        if status.dni.startswith("iter_"):
+            try:
+                self._iter_actual = int(status.dni.split("_", 1)[1])
+            except ValueError:
+                pass
+        progreso = (self._iter_actual - 1) * max(1, self._total_pasos // max(1, self._veces))
+        progreso += status.paso_idx + 1
+        self._control.set_progress(progreso, self._total_pasos)
+        self._control.set_title(
+            f"▶ Reproduciendo {self._macro_nombre}",
+            f"Iteración {self._iter_actual}/{self._veces} · paso {status.paso_idx + 1}",
+        )
+        self._control.set_action(status.descripcion or "")
 
     def _on_progress(self, done: int, total: int):
         self.progress.setMaximum(total)
@@ -212,11 +275,28 @@ class ReplayPanel(QWidget):
         self.summary_label.setTextFormat(Qt.TextFormat.RichText)
         self.run_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        self._cleanup_control()
 
     def _on_error(self, msg: str):
         self.log_view.append(f"\n❌ ERROR: {msg}")
         self.run_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        self._cleanup_control()
+
+    def _cleanup_control(self):
+        """Cierra el panel flotante y restaura MemoviPro tras la ejecución."""
+        if getattr(self, "_control", None) is not None:
+            try:
+                self._control.close()
+                self._control.deleteLater()
+            except Exception:
+                pass
+            self._control = None
+        main_win = self.window()
+        if main_win is not None:
+            main_win.showNormal()
+            main_win.raise_()
+            main_win.activateWindow()
 
     def abort(self):
         if self._runner:
