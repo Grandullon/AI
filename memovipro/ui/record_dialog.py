@@ -161,8 +161,11 @@ class RecordDialog(QDialog):
         self._update_timer.start(300)
         self._start_hotkey()
 
-        # Reemplazar el diálogo gordo por el panel compacto y minimizar
-        # MemoviPro para no estorbar a la app que se está grabando.
+        # Mostrar también el panel flotante en la esquina (resumen visual).
+        # NO ocultamos este diálogo ni minimizamos MemoviPro: ambas
+        # operaciones rompían la captura de pynput en Windows.
+        # El diálogo grande queda visible donde está. El panel flotante
+        # es un extra siempre encima con los mismos controles.
         self._control = ControlWindow(parent=None)
         self._control.set_title("🔴 GRABANDO", "Pulsa F9 o el botón Parar para terminar")
         self._control.set_action("0 acciones capturadas")
@@ -170,21 +173,6 @@ class RecordDialog(QDialog):
         self._control.pause_btn.setVisible(False)  # no se pausa la grabación
         self._control.stop_requested.connect(self._stop)
         self._control.show_in_corner()
-
-        self.hide()  # ocultamos el diálogo grande con countdown
-        # PROBLEMA: hide() interfiere con la captura de pynput o el
-        # bucle modal de exec(). Síntoma: F9 detiene pero nada queda
-        # grabado. Workaround: mover el diálogo fuera de pantalla y
-        # achicarlo a 1×1, así Qt lo considera "vivo" y el modal sigue
-        # funcionando, pero el usuario solo ve el panel flotante.
-        self.resize(1, 1)
-        self.move(-30000, -30000)
-        self.show()
-        parent = self.parent()
-        main_win = parent.window() if parent is not None else None
-        if main_win is not None:
-            self._main_window_was_visible = main_win.isVisible()
-            main_win.showMinimized()
 
     def _tick_update(self):
         if self._recorder is None:
@@ -299,7 +287,8 @@ class RecordDialog(QDialog):
         self.reject()
 
     def _restaurar_ventanas(self):
-        """Cierra el panel flotante y restaura MemoviPro."""
+        """Cierra el panel flotante. La ventana principal no se minimiza
+        durante la grabación, así que no hace falta restaurarla."""
         if self._control is not None:
             try:
                 self._control.close()
@@ -307,15 +296,6 @@ class RecordDialog(QDialog):
             except Exception:
                 pass
             self._control = None
-        parent = self.parent()
-        main_win = parent.window() if parent is not None else None
-        if main_win is not None and self._main_window_was_visible:
-            try:
-                main_win.showNormal()
-                main_win.raise_()
-                main_win.activateWindow()
-            except Exception:
-                pass
 
     def closeEvent(self, event):
         self._cancelar()
