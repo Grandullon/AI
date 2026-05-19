@@ -199,6 +199,11 @@ class RunPanel(QWidget):
         self._thread.progress.connect(self._on_progress)
         self._thread.finished_summary.connect(self._on_finished)
         self._thread.error.connect(self._on_error)
+
+        # Minimizar MemoviPro para que no estorbe a la app que se va a
+        # automatizar. Se restaura cuando termina la iteración.
+        self._minimize_main_window()
+
         self._thread.start()
         self.run_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
@@ -215,14 +220,34 @@ class RunPanel(QWidget):
         self._append_log(f"\n=== FIN ===\nOK: {summary.ok}   KO: {summary.ko}   Total: {summary.total}\nLog: {summary.log_path}")
         self.run_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        self._restore_main_window()
         self.on_finished(summary)
 
     def _on_error(self, msg: str):
         self._append_log(f"\n❌ ERROR: {msg}")
         self.run_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        self._restore_main_window()
 
     def abort(self):
         if self._runner:
             self._runner.abort()
         self._append_log("\n⏹  Abortado por el usuario")
+
+    def _minimize_main_window(self):
+        main_win = self.window()
+        if main_win is not None:
+            try:
+                main_win.showMinimized()
+            except Exception:
+                pass
+
+    def _restore_main_window(self):
+        main_win = self.window()
+        if main_win is not None:
+            try:
+                main_win.showNormal()
+                main_win.raise_()
+                main_win.activateWindow()
+            except Exception:
+                pass

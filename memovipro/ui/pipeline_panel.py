@@ -30,6 +30,8 @@ from PyQt6.QtWidgets import (
 from core.pipeline import Condicion, OnFailPolicy, Pipeline, PipelineStep
 from core.pipeline_runner import PipelineRunner, PipelineStepResult, PipelineSummary
 
+from .control_window import ControlWindow
+
 
 COLS_PASOS = ["#", "Macro", "Veces", "Velocidad", "Pausa (s)", "Si falla", "Condición", "Descripción"]
 
@@ -121,6 +123,7 @@ class _PasoDialog(QDialog):
 
 class _PipelineThread(QThread):
     log_line = pyqtSignal(str)
+    step_start = pyqtSignal(int, object)  # idx, PipelineStep
     finished_summary = pyqtSignal(object)
     error = pyqtSignal(str)
 
@@ -131,6 +134,7 @@ class _PipelineThread(QThread):
     def run(self):
         try:
             self.runner.on_log = lambda m: self.log_line.emit(m)
+            self.runner.on_step_start = lambda idx, paso: self.step_start.emit(idx, paso)
             summary = self.runner.run()
             self.finished_summary.emit(summary)
         except Exception as exc:
@@ -327,11 +331,57 @@ class PipelinePanel(QWidget):
         )
         self._thread = _PipelineThread(self._runner)
         self._thread.log_line.connect(self.log_view.append)
+        self._thread.step_start.connect(self._on_step_start)
         self._thread.finished_summary.connect(self._on_finished)
         self._thread.error.connect(self._on_error)
+
+        # Panel flotante de control (igual que en Reproducir) y minimizar
+        # MemoviPro para que no estorbe a las apps que automatizan los
+        # pasos del pipeline.
+        self._control = ControlWindow(parent=None)
+        self._control.set_title(
+            f"▶ Cadena: {self.pipeline.nombre}",
+            f"Paso 0/{len(self.pipeline.pasos)}",
+        )
+        self._control.set_progress(0, len(self.pipeline.pasos))
+        self._control.pause_toggled.connect(self._on_pause_toggled)
+        self._control.stop_requested.connect(self._on_stop_clicked)
+        self._control.show_in_corner()
+
+        self._minimize_main_window()
+
         self._thread.start()
         self.run_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
+
+    # ---- callbacks del panel flotante ----
+    def _on_pause_toggled(self, paused: bool):
+        # PipelineRunner delega en el Player actual, que sí soporta pausa.
+        if self._runner is None:
+            return
+        cur = getattr(self._runner, "_current_replay", None)
+        if cur is None:
+            return
+        if paused:
+            cur.pause()
+            self.log_view.append("⏸  Pausa solicitada")
+        else:
+            cur.resume()
+            self.log_view.append("▶  Reanudado")
+
+    def _on_stop_clicked(self):
+        self.abort()
+        self.log_view.append("⏹  Detenido desde el panel de control")
+
+    def _on_step_start(self, idx: int, paso):
+        if self._control is None:
+            return
+        self._control.set_title(
+            f"▶ Cadena: {self.pipeline.nombre}",
+            f"Paso {idx}/{len(self.pipeline.pasos)}",
+        )
+        self._control.set_progress(idx, len(self.pipeline.pasos))
+        self._control.set_action(f"Macro: {paso.macro}")
 
     def abort(self):
         if self._runner:
@@ -344,8 +394,38 @@ class PipelinePanel(QWidget):
         )
         self.run_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        self._cleanup_control()
 
     def _on_error(self, msg: str):
         self.log_view.append(f"\n❌ ERROR: {msg}")
         self.run_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        self._cleanup_control()
+
+    def _minimize_main_window(self):
+        main_win = self.window()
+        if main_win is not None:
+            try:
+                main_win.showMinimized()
+            except Exception:
+                pass
+
+    def _restore_main_window(self):
+        main_win = self.window()
+        if main_win is not None:
+            try:
+                main_win.showNormal()
+                main_win.raise_()
+                main_win.activateWindow()
+            except Exception:
+                pass
+
+    def _cleanup_control(self):
+        if getattr(self, "_control", None) is not None:
+            try:
+                self._control.close()
+                self._control.deleteLater()
+            except Exception:
+                pass
+            self._control = None
+        self._restore_main_window()

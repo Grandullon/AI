@@ -657,10 +657,27 @@ class SchedulePanel(QWidget):
             return
         ok, msg = ejecutar_ahora(nombre)
         if ok:
-            QMessageBox.information(self, "Tarea lanzada", msg + "\n\nRevisa los logs para ver el resultado.")
+            # La tarea corre en un proceso aparte (memovipro-run.exe).
+            # Minimizamos MemoviPro para que no estorbe al automatizar.
+            # Al terminar la tarea, el usuario restaurará manualmente
+            # (no tenemos callback del proceso externo).
+            QMessageBox.information(
+                self, "Tarea lanzada",
+                msg + "\n\nMemoviPro se va a minimizar para no estorbar. "
+                "Restáuralo manualmente cuando termine la tarea.",
+            )
+            self._minimize_main_window()
         else:
             QMessageBox.warning(self, "No se pudo ejecutar", msg)
         self.refresh_tareas()
+
+    def _minimize_main_window(self):
+        main_win = self.window()
+        if main_win is not None:
+            try:
+                main_win.showMinimized()
+            except Exception:
+                pass
 
     def _toggle_habilitar_seleccionada(self):
         nombre = self._nombre_seleccionado()
