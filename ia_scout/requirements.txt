@@ -1,0 +1,7 @@
+anthropic>=0.39
+feedparser>=6.0
+google-auth>=2.20
+google-auth-oauthlib>=1.0
+gspread>=6.0
+python-dotenv>=1.0
+requests>=2.31
