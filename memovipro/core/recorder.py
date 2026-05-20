@@ -463,9 +463,12 @@ class Recorder:
         return None
 
     # ---- Construcción de la Macro (puede ser lenta si se resuelven selectores) ----
-    # Cap a la pausa entre eventos: nadie quiere reproducir una pausa de varios
-    # minutos porque el usuario se fue a por café a mitad de la grabación.
-    MAX_DELAY_S = 30.0
+    # Cap a la pausa entre eventos: 30 minutos. Antes eran 30s pero el
+    # usuario reportó que necesita pausas más largas en flujos reales
+    # (cargas pesadas, esperar a un operador, refrescos lentos del SAP,
+    # etc). 30 min es generoso pero bounded: si te dejas la grabación
+    # encendida toda la noche, la pausa no crece sin límite.
+    MAX_DELAY_S = 1800.0
 
     @staticmethod
     def construir_macro(

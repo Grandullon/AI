@@ -41,13 +41,29 @@ def test_construir_macro_calcula_delay_entre_eventos():
     assert abs(macro.pasos[2].delay_before_s - 2.3) < 1e-6
 
 
-def test_construir_macro_cap_30s():
+def test_construir_macro_preserva_5_minutos():
+    """5 minutos de pausa deben preservarse íntegros (nuevo cap = 30 min)."""
     eventos = [
         EventoCrudo(tipo="click", x=1, y=1, timestamp=100.0),
-        EventoCrudo(tipo="click", x=2, y=2, timestamp=100 + 120),  # 2 minutos
+        EventoCrudo(tipo="click", x=2, y=2, timestamp=100 + 300),  # 5 minutos
     ]
     macro = Recorder.construir_macro(eventos, resolver_selectores=False)
-    assert macro.pasos[1].delay_before_s == 30.0
+    assert abs(macro.pasos[1].delay_before_s - 300.0) < 1e-6
+
+
+def test_construir_macro_cap_a_30_minutos():
+    """Si la pausa supera 30 minutos (usuario olvidó cerrar grabación),
+    se recorta. Antes el cap eran 30s; ahora son 30 min (1800s)."""
+    eventos = [
+        EventoCrudo(tipo="click", x=1, y=1, timestamp=100.0),
+        EventoCrudo(tipo="click", x=2, y=2, timestamp=100 + 7200),  # 2 horas
+    ]
+    macro = Recorder.construir_macro(eventos, resolver_selectores=False)
+    assert macro.pasos[1].delay_before_s == 1800.0
+
+
+def test_recorder_max_delay_constante():
+    assert Recorder.MAX_DELAY_S == 1800.0
 
 
 def test_construir_macro_sin_timestamps_pone_delay_cero():
@@ -62,17 +78,23 @@ def test_construir_macro_sin_timestamps_pone_delay_cero():
 def test_player_velocidad_aplica_factor():
     """Verifica que el cálculo de tiempo a esperar es el correcto.
 
-    No usa pywinauto: solo se prueba la lógica del divisor.
+    No usa pywinauto: solo se prueba la lógica del divisor + sanity cap
+    del player a 1 hora (3600s).
     """
-    # 4 segundos a 2x → 2 segundos. A 0.5x → 8 segundos (capado a 30).
-    # A velocidad=0 (sin pausas) → 0.
     def calcular(delay, velocidad):
         if delay <= 0 or velocidad <= 0:
             return 0.0
-        return min(delay / velocidad, 30.0)
+        return min(delay / velocidad, 3600.0)
 
+    # Casos básicos
     assert calcular(4.0, 2.0) == 2.0
     assert calcular(4.0, 0.5) == 8.0
     assert calcular(4.0, 0.0) == 0.0
     assert calcular(0.0, 1.0) == 0.0
-    assert calcular(120.0, 1.0) == 30.0  # capped
+
+    # Pausas largas: ya no se cortan a 30s. 5 min se respeta.
+    assert calcular(300.0, 1.0) == 300.0
+    # 10 min a 2x velocidad = 5 min
+    assert calcular(600.0, 2.0) == 300.0
+    # Sanity cap: si el YAML pone algo descomunal (10h), se recorta a 1h.
+    assert calcular(36000.0, 1.0) == 3600.0

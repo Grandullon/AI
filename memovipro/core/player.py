@@ -191,12 +191,21 @@ class Player:
 
         Si velocidad <= 0 se omiten las pausas. El sleep se hace en
         tramos cortos para poder responder a abort sin esperas largas.
+        Cap de seguridad: nunca más de 1 hora entre dos pasos (por si
+        alguien edita el YAML a mano con un valor descomunal).
         """
         if paso.delay_before_s <= 0 or self.velocidad <= 0:
             return
         restante = paso.delay_before_s / self.velocidad
-        # Tope absoluto: nunca más de 30s entre dos pasos.
-        restante = min(restante, 30.0)
+        # Sanity cap: 1 hora. El cap "razonable" para grabaciones está
+        # en Recorder.MAX_DELAY_S (30 min). Este es por si el YAML viene
+        # editado a mano con algo absurdo.
+        restante = min(restante, 3600.0)
+        if restante > 5.0:
+            logger.info(
+                "Esperando {:.1f}s antes del siguiente paso ({})",
+                restante, paso.descripcion or paso.tipo.value,
+            )
         while restante > 0:
             if self._abort.is_set():
                 return
