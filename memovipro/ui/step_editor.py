@@ -232,29 +232,56 @@ class StepEditor(QWidget):
             QMessageBox.information(self, "Grabación", "No se capturó ningún paso.")
 
     def _insertar_plantilla_arranque(self):
-        """Inserta al PRINCIPIO de la macro la secuencia de arranque limpio:
-        Win+D (minimizar todo) → esperar 1s → window_ensure (traer la app
-        al frente y maximizar). Pide al usuario el título de la ventana
-        objetivo (regex parcial)."""
-        from PyQt6.QtWidgets import QInputDialog
-        titulo, ok = QInputDialog.getText(
-            self, "Plantilla: arranque limpio",
-            "Título (regex parcial) de la ventana que quieres traer al frente:\n"
-            "Ej. 'GERHONTE', 'Excel', 'Outlook'",
-            text=self.ventana.text().strip(),
+        """Inserta al PRINCIPIO de la macro la secuencia de arranque limpio.
+
+        Abre un diálogo rico (`PlantillaArranqueDialog`) que detecta las
+        ventanas abiertas, deja al usuario probar el patrón, y
+        opcionalmente especificar la ruta del .exe para lanzar la app
+        si no estuviera abierta.
+
+        Pasos generados:
+            [opcional] LAUNCH_PROGRAM <exe> + sleep 2s
+            SEND_KEYS {VK_LWIN down}d{VK_LWIN up}   (Win+D)
+            SLEEP 1s
+            WINDOW_ENSURE <título> state=maximized timeout=10s
+        """
+        from PyQt6.QtWidgets import QDialog
+        from .plantilla_arranque_dialog import PlantillaArranqueDialog
+
+        dlg = PlantillaArranqueDialog(
+            ventana_principal_actual=self.ventana.text().strip(),
+            parent=self,
         )
-        if not ok:
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        titulo = titulo.strip()
+        titulo = dlg.titulo
+        exe_path = dlg.exe_path
         if not titulo:
-            QMessageBox.warning(self, "Sin título", "Necesito un título de ventana.")
+            QMessageBox.warning(self, "Sin título", "Necesito un patrón de título.")
             return
 
-        nuevos = [
+        nuevos: list = []
+        if exe_path:
+            from pathlib import Path
+            nombre_exe = Path(exe_path).name or exe_path
+            nuevos.append(Step(
+                tipo=StepType.LAUNCH_PROGRAM,
+                valor=exe_path,
+                descripcion=f"Lanzar: {nombre_exe}",
+                delay_before_s=0.0,
+            ))
+            nuevos.append(Step(
+                tipo=StepType.SLEEP,
+                valor="2.0",
+                descripcion="Espera 2s a que arranque la aplicación",
+                delay_before_s=0.0,
+            ))
+
+        nuevos += [
             Step(
                 tipo=StepType.SEND_KEYS,
                 valor="{VK_LWIN down}d{VK_LWIN up}",
-                descripcion="Tecla Win+D  (mostrar escritorio / minimizar todo)",
+                descripcion="Tecla Win+D  (minimizar todo)",
                 delay_before_s=0.5,
             ),
             Step(
@@ -272,19 +299,14 @@ class StepEditor(QWidget):
                 delay_before_s=0.5,
             ),
         ]
-        # Insertar al PRINCIPIO de la macro
         self.macro.pasos = nuevos + self.macro.pasos
-        # Y, ya que estamos, sugerimos rellenar la ventana_principal
         if not self.ventana.text().strip():
             self.ventana.setText(titulo)
         self._refresh_table()
         QMessageBox.information(
             self, "Plantilla añadida",
-            f"Insertados 3 pasos al principio de la macro:\n"
-            f"  1. Win+D (minimizar todo)\n"
-            f"  2. Sleep 1s\n"
-            f"  3. window_ensure '{titulo}' (maximizar al frente)\n\n"
-            f"He puesto también '{titulo}' como Ventana principal (si estaba vacía).",
+            f"Se insertaron {len(nuevos)} pasos al principio de la macro.\n"
+            f"Patrón de ventana: '{titulo}'.",
         )
 
     def _on_macro_recorded(self, macro: Macro):

@@ -32,11 +32,16 @@ def test_window_ensure_es_un_step_type():
 
 
 def test_player_tiene_metodo_asegurar_ventana_objetivo():
-    """Verificación estática de que el player implementa el método."""
+    """Verificación estática de que el player implementa el método.
+
+    Tras la extracción a core.window_utils, el método del Player ya no
+    contiene la lógica de pywinauto directamente — la delega a
+    window_utils.asegurar_ventana. Verificamos esa delegación y que
+    se mantiene el throttling (`_last_anchor_ts`).
+    """
     import inspect
     from core.player import Player
     assert hasattr(Player, "_asegurar_ventana_objetivo")
     src = inspect.getsource(Player._asegurar_ventana_objetivo)
-    assert "set_focus" in src
-    assert "maximize" in src
+    assert "asegurar_ventana" in src
     assert "_last_anchor_ts" in src

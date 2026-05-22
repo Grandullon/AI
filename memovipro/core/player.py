@@ -364,61 +364,25 @@ class Player:
     ) -> None:
         """Asegura que la ventana objetivo está al frente y en el estado pedido.
 
-        - state: 'maximized' | 'normal' | 'minimized'
-        - Cacheamos la última llamada para no rehacer si pasaron <0.5s
-          (a no ser que `force=True`).
-        - Si la ventana no existe, log debug y seguimos (no abortamos).
+        Wrapper sobre `core.window_utils.asegurar_ventana` que añade el
+        cache/throttling (no rehacer si pasaron <0.5s) y el manejo de
+        dry-run. La lógica real de pywinauto vive en el módulo
+        `window_utils` para que pueda usarse también desde la UI (botón
+        "Probar patrón" de la plantilla arranque).
         """
-        if not _HAS_PYWINAUTO:
-            return
         title = title_re or self.macro.ventana_principal
         if not title:
             return
         ahora = time.time()
         if not force and (ahora - self._last_anchor_ts) < self._anchor_min_interval_s:
             return
-        if self.dry_run:
-            logger.info("[dry-run] window_ensure '{}' state={}", title, state)
+        from .window_utils import asegurar_ventana
+        ok, msg = asegurar_ventana(title, state=state, timeout_s=timeout_s, dry_run=self.dry_run)
+        if ok:
             self._last_anchor_ts = ahora
-            return
-        try:
-            win = Desktop(backend="uia").window(title_re=f".*{title}.*")
-            try:
-                if not win.exists(timeout=min(timeout_s, 1.0)):
-                    logger.debug("Anchor: ventana '{}' no encontrada", title)
-                    return
-            except Exception:
-                return
-            try:
-                if win.is_minimized() and state != "minimized":
-                    win.restore()
-            except Exception:
-                pass
-            if state == "maximized":
-                try:
-                    if not win.is_maximized():
-                        win.maximize()
-                except Exception:
-                    pass
-            elif state == "minimized":
-                try:
-                    win.minimize()
-                except Exception:
-                    pass
-            elif state == "normal":
-                try:
-                    if win.is_maximized() or win.is_minimized():
-                        win.restore()
-                except Exception:
-                    pass
-            try:
-                win.set_focus()
-            except Exception:
-                pass
-            self._last_anchor_ts = ahora
-            logger.debug("Anchor OK: '{}' → {}", title, state)
-        except Exception as exc:
-            logger.debug("Anchor falló para '{}': {}", title, exc)
+            logger.debug("Anchor OK: {}", msg)
+        else:
+            logger.debug("Anchor falló para '{}': {}", title, msg)
 
     def _focus_window(self, titulo: str):
         win = Desktop(backend="uia").window(title_re=f".*{titulo}.*") if titulo else None
