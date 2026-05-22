@@ -92,6 +92,7 @@ class StepThroughPanel(QWidget):
         screenshots_dir: Path,
         data_dir: Path,
         on_macro_modified: Callable[[], None] | None = None,
+        on_step_changed: Callable[[int], None] | None = None,
         parent=None,
     ):
         super().__init__(parent=None)  # top-level
@@ -99,6 +100,7 @@ class StepThroughPanel(QWidget):
         self.screenshots_dir = screenshots_dir
         self.data_dir = data_dir
         self.on_macro_modified = on_macro_modified
+        self.on_step_changed = on_step_changed
 
         self.setObjectName("StepRoot")
         self.setWindowFlags(
@@ -204,6 +206,13 @@ class StepThroughPanel(QWidget):
         self.action_label.setText(
             f"<b>{n}.</b> {status.descripcion or '(sin descripción)'}"
         )
+        # Marcar el paso en la tabla del editor (para que el usuario sepa
+        # dónde se ha parado si quiere modificar algo en ese punto).
+        if self.on_step_changed is not None:
+            try:
+                self.on_step_changed(status.paso_idx)
+            except Exception:
+                pass
 
     def _on_next(self):
         if self._runner is None:

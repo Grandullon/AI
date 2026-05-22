@@ -161,11 +161,10 @@ class RecordDialog(QDialog):
         self._update_timer.start(300)
         self._start_hotkey()
 
-        # Mostrar también el panel flotante en la esquina (resumen visual).
-        # NO ocultamos este diálogo ni minimizamos MemoviPro: ambas
-        # operaciones rompían la captura de pynput en Windows.
-        # El diálogo grande queda visible donde está. El panel flotante
-        # es un extra siempre encima con los mismos controles.
+        # Panel flotante en la esquina (resumen visual). Mantenemos este
+        # diálogo grande VISIBLE — ocultarlo rompió la captura en una
+        # iteración anterior (5aa9ba5). Solo minimizamos la ventana
+        # PRINCIPAL de MemoviPro para no estorbar a la app que graba.
         self._control = ControlWindow(parent=None)
         self._control.set_title("🔴 GRABANDO", "Pulsa F9 o el botón Parar para terminar")
         self._control.set_action("0 acciones capturadas")
@@ -173,6 +172,18 @@ class RecordDialog(QDialog):
         self._control.pause_btn.setVisible(False)  # no se pausa la grabación
         self._control.stop_requested.connect(self._stop)
         self._control.show_in_corner()
+
+        # Minimizar la ventana PRINCIPAL (no este diálogo modal) para
+        # que MemoviPro no estorbe al automatizar. La diferencia clave
+        # respecto al intento fallido anterior: NO ocultamos el modal.
+        parent = self.parent()
+        main_win = parent.window() if parent is not None else None
+        if main_win is not None and main_win is not self:
+            self._main_was_visible = main_win.isVisible()
+            try:
+                main_win.showMinimized()
+            except Exception:
+                pass
 
     def _tick_update(self):
         if self._recorder is None:
@@ -287,8 +298,8 @@ class RecordDialog(QDialog):
         self.reject()
 
     def _restaurar_ventanas(self):
-        """Cierra el panel flotante. La ventana principal no se minimiza
-        durante la grabación, así que no hace falta restaurarla."""
+        """Cierra el panel flotante y restaura la ventana principal
+        de MemoviPro si la hemos minimizado durante la grabación."""
         if self._control is not None:
             try:
                 self._control.close()
@@ -296,6 +307,19 @@ class RecordDialog(QDialog):
             except Exception:
                 pass
             self._control = None
+        parent = self.parent()
+        main_win = parent.window() if parent is not None else None
+        if (
+            main_win is not None
+            and main_win is not self
+            and getattr(self, "_main_was_visible", False)
+        ):
+            try:
+                main_win.showNormal()
+                main_win.raise_()
+                main_win.activateWindow()
+            except Exception:
+                pass
 
     def closeEvent(self, event):
         self._cancelar()

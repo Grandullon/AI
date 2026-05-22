@@ -92,6 +92,8 @@ class StepEditor(QWidget):
         self._inspector.error.connect(self._on_inspect_error)
 
     def _refresh_table(self):
+        # Recordar el paso resaltado para reaplicar el highlight tras refrescar
+        hl = getattr(self, "_highlighted_row", -1)
         self.tabla.setRowCount(0)
         for i, paso in enumerate(self.macro.pasos):
             self.tabla.insertRow(i)
@@ -117,6 +119,59 @@ class StepEditor(QWidget):
                 if col == 0:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.tabla.setItem(i, col, item)
+        # Re-aplicar highlight si había uno y sigue siendo válido
+        if 0 <= hl < self.tabla.rowCount():
+            self._aplicar_highlight(hl)
+
+    def _aplicar_highlight(self, idx: int):
+        """Pinta de fondo amarillo la fila `idx` para indicar el paso actual."""
+        from PyQt6.QtGui import QBrush, QColor
+        brush = QBrush(QColor("#fff3cd"))
+        for c in range(self.tabla.columnCount()):
+            item = self.tabla.item(idx, c)
+            if item:
+                item.setBackground(brush)
+        self._highlighted_row = idx
+
+    def highlight_step(self, idx: int):
+        """Marca un paso como 'actual' (próximo a ejecutar) en la tabla.
+
+        Llamado desde el panel de step-through cuando avanza al siguiente
+        paso. Limpia el highlight anterior, pinta el nuevo, y hace
+        scroll para que sea visible.
+        """
+        # Quitar highlight anterior
+        prev = getattr(self, "_highlighted_row", -1)
+        if 0 <= prev < self.tabla.rowCount():
+            from PyQt6.QtGui import QBrush
+            default_brush = QBrush()
+            for c in range(self.tabla.columnCount()):
+                item = self.tabla.item(prev, c)
+                if item:
+                    item.setBackground(default_brush)
+        # Aplicar nuevo
+        if 0 <= idx < self.tabla.rowCount():
+            self._aplicar_highlight(idx)
+            # Scroll para que se vea
+            target = self.tabla.item(idx, 0)
+            if target is not None:
+                self.tabla.scrollToItem(target)
+                self.tabla.selectRow(idx)
+        else:
+            self._highlighted_row = -1
+
+    def clear_step_highlight(self):
+        """Quita el highlight (lo llama el editor al cerrar step-through
+        si el usuario quiere limpiar)."""
+        prev = getattr(self, "_highlighted_row", -1)
+        if 0 <= prev < self.tabla.rowCount():
+            from PyQt6.QtGui import QBrush
+            default_brush = QBrush()
+            for c in range(self.tabla.columnCount()):
+                item = self.tabla.item(prev, c)
+                if item:
+                    item.setBackground(default_brush)
+        self._highlighted_row = -1
 
     def _sync_from_form(self):
         self.macro.nombre = self.nombre.text().strip() or "nueva_macro"
@@ -257,6 +312,7 @@ class StepEditor(QWidget):
             screenshots_dir=screenshots_dir,
             data_dir=data_dir,
             on_macro_modified=self._refresh_table,
+            on_step_changed=self.highlight_step,
             parent=self,
         )
         self._step_panel.finished.connect(self._on_step_through_finished)
