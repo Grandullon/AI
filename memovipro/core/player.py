@@ -290,7 +290,33 @@ class Player:
             button = str(extra.get("button", "left"))
             self._drag_xy(x1, y1, x2, y2, button=button)
             return
+        if tipo == StepType.LAUNCH_PROGRAM:
+            cmd = (paso.valor or "").strip()
+            if not cmd:
+                raise ValueError("launch_program sin valor (ruta al .exe)")
+            extra = paso.extra or {}
+            args = list(extra.get("args", []))
+            self._launch_program(cmd, args)
+            return
         raise ValueError(f"Tipo de paso no soportado: {tipo}")
+
+    def _launch_program(self, cmd: str, args: list) -> None:
+        """Lanza un programa externo. Si hay args usa subprocess; si no,
+        os.startfile() (que entiende .exe, .lnk, .url, .bat, ...)."""
+        if self.dry_run:
+            logger.info("[dry-run] launch_program: {} {}", cmd, args)
+            return
+        try:
+            if args:
+                import subprocess
+                subprocess.Popen([cmd, *args])
+                logger.info("Lanzado (subprocess): {} {}", cmd, args)
+            else:
+                import os as _os
+                _os.startfile(cmd)
+                logger.info("Lanzado (startfile): {}", cmd)
+        except Exception as exc:
+            raise RuntimeError(f"No se pudo lanzar '{cmd}': {exc}")
 
     def _scroll_xy(self, x: int, y: int, dx: int, dy: int) -> None:
         if self.dry_run:

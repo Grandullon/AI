@@ -96,10 +96,13 @@ def _button_corto(button) -> str:
 
 
 def _modifier_for(nombre: str) -> str | None:
-    """Devuelve 'ctrl' | 'shift' | 'alt' si `nombre` es una tecla modificadora.
+    """Devuelve 'ctrl' | 'shift' | 'alt' | 'win' si `nombre` es una tecla
+    modificadora.
 
-    pynput entrega ctrl_l, ctrl_r, shift_l, shift_r, alt_l, alt_r, alt_gr...
-    Los unificamos a un solo nombre lógico por familia.
+    pynput entrega ctrl_l, ctrl_r, shift_l, shift_r, alt_l, alt_r, alt_gr,
+    y para la tecla Windows usa cmd / cmd_l / cmd_r (nombrado así por
+    compatibilidad con macOS). Los unificamos a un nombre lógico por
+    familia.
     """
     n = nombre.lower()
     if n in ("ctrl", "ctrl_l", "ctrl_r"):
@@ -108,13 +111,16 @@ def _modifier_for(nombre: str) -> str | None:
         return "shift"
     if n in ("alt", "alt_l", "alt_r", "alt_gr"):
         return "alt"
+    if n in ("cmd", "cmd_l", "cmd_r", "win", "win_l", "win_r"):
+        return "win"
     return None
 
 
 def _modifiers_sendkeys_prefix(mods: set[str]) -> str:
     """Construye el prefijo SendKeys (estilo pywinauto): ^ + % para Ctrl/Shift/Alt.
 
-    Orden estándar: Ctrl+Alt+Shift.
+    NOTA: La tecla Win NO se puede expresar con prefijo SendKeys
+    estándar. Para combinaciones con Win usa `_construir_send_keys_token`.
     """
     prefix = ""
     if "ctrl" in mods:
@@ -126,9 +132,62 @@ def _modifiers_sendkeys_prefix(mods: set[str]) -> str:
     return prefix
 
 
+def _construir_send_keys_token(mods: set[str], base: str) -> str:
+    """Construye el token completo de send_keys con los modificadores aplicados.
+
+    - Sin Win: usa el prefijo SendKeys estándar (^a, +{TAB}, %{F4}, ^+s)
+    - Con Win: usa la sintaxis explícita con {VK_LWIN down}...{VK_LWIN up}
+      porque pywinauto.keyboard no acepta `#` como atajo para Win.
+
+    Ejemplos:
+        ({ctrl}, "a") → "^a"
+        ({ctrl, shift}, "s") → "^+s"
+        ({win}, "d") → "{VK_LWIN down}d{VK_LWIN up}"
+        ({win}, "{UP}") → "{VK_LWIN down}{UP}{VK_LWIN up}"
+        ({win}, "1") → "{VK_LWIN down}1{VK_LWIN up}"
+        ({win, ctrl}, "d") → "{VK_CONTROL down}{VK_LWIN down}d{VK_LWIN up}{VK_CONTROL up}"
+    """
+    if not mods:
+        return base
+    if "win" not in mods:
+        return _modifiers_sendkeys_prefix(mods) + base
+    # Win presente: wrap con down/up explícitos.
+    pre = ""
+    post = ""
+    if "ctrl" in mods:
+        pre += "{VK_CONTROL down}"
+        post = "{VK_CONTROL up}" + post
+    if "alt" in mods:
+        pre += "{VK_MENU down}"
+        post = "{VK_MENU up}" + post
+    if "shift" in mods:
+        pre += "{VK_SHIFT down}"
+        post = "{VK_SHIFT up}" + post
+    pre += "{VK_LWIN down}"
+    post = "{VK_LWIN up}" + post
+    return pre + base + post
+
+
+def _friendly_combo(mods: set[str], base: str) -> str:
+    """Descripción legible: 'Win+D', 'Ctrl+Shift+S', 'Win+↑'."""
+    pretty_arrows = {"{UP}": "↑", "{DOWN}": "↓", "{LEFT}": "←", "{RIGHT}": "→"}
+    pretty_base = pretty_arrows.get(base, base.strip("{}").upper() if base.startswith("{") else base.upper())
+    partes = []
+    if "ctrl" in mods:
+        partes.append("Ctrl")
+    if "alt" in mods:
+        partes.append("Alt")
+    if "shift" in mods:
+        partes.append("Shift")
+    if "win" in mods:
+        partes.append("Win")
+    partes.append(pretty_base)
+    return "+".join(partes)
+
+
 def _modifiers_str(mods: set[str]) -> str:
     """Serializa el set a 'ctrl+shift' (orden estable)."""
-    orden = ["ctrl", "alt", "shift"]
+    orden = ["ctrl", "alt", "shift", "win"]
     presentes = [m for m in orden if m in mods]
     return "+".join(presentes)
 
@@ -389,7 +448,7 @@ class Recorder:
             return
         with self._lock:
             char = self._tecla_a_char(key)
-            # Si hay Ctrl o Alt activos, es un atajo (Ctrl+A, Alt+F, ...)
+            # Si hay Ctrl/Alt/Win activos, es un atajo (Ctrl+A, Alt+F, Win+D...)
             # — no texto normal. Shift solo se considera "texto en mayúscula"
             # y se deja al buffer.
             non_shift_mods = self._modifiers - {"shift"}
@@ -399,17 +458,17 @@ class Recorder:
                 return
             self._flush_text(force=True)
             if char is not None:
-                # Letra con Ctrl/Alt: emitir como atajo de teclado.
-                token = _modifiers_sendkeys_prefix(self._modifiers) + char
+                base = char
             else:
                 base = self._tecla_a_send_keys(key)
                 if not base:
                     return
-                token = _modifiers_sendkeys_prefix(self._modifiers) + base
+            token = _construir_send_keys_token(self._modifiers, base)
+            descripcion = "Tecla " + _friendly_combo(self._modifiers, base)
             self.eventos_crudos.append(EventoCrudo(
                 tipo="send_keys",
                 valor=token,
-                descripcion=f"Tecla {token}",
+                descripcion=descripcion,
                 timestamp=time.time(),
             ))
 

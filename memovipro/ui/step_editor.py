@@ -74,6 +74,7 @@ class StepEditor(QWidget):
             ("Subir", lambda: self._move(-1), None),
             ("Bajar", lambda: self._move(1), None),
             ("Inspector", self._launch_inspector, None),
+            ("⚡ Plantilla arranque", self._insertar_plantilla_arranque, "#8e44ad"),
             ("Cargar YAML", self._load, None),
             ("Guardar YAML", self._save, None),
         ]
@@ -229,6 +230,62 @@ class StepEditor(QWidget):
             self._on_macro_recorded(dlg.macro)
         elif result == QDialog.DialogCode.Accepted:
             QMessageBox.information(self, "Grabación", "No se capturó ningún paso.")
+
+    def _insertar_plantilla_arranque(self):
+        """Inserta al PRINCIPIO de la macro la secuencia de arranque limpio:
+        Win+D (minimizar todo) → esperar 1s → window_ensure (traer la app
+        al frente y maximizar). Pide al usuario el título de la ventana
+        objetivo (regex parcial)."""
+        from PyQt6.QtWidgets import QInputDialog
+        titulo, ok = QInputDialog.getText(
+            self, "Plantilla: arranque limpio",
+            "Título (regex parcial) de la ventana que quieres traer al frente:\n"
+            "Ej. 'GERHONTE', 'Excel', 'Outlook'",
+            text=self.ventana.text().strip(),
+        )
+        if not ok:
+            return
+        titulo = titulo.strip()
+        if not titulo:
+            QMessageBox.warning(self, "Sin título", "Necesito un título de ventana.")
+            return
+
+        nuevos = [
+            Step(
+                tipo=StepType.SEND_KEYS,
+                valor="{VK_LWIN down}d{VK_LWIN up}",
+                descripcion="Tecla Win+D  (mostrar escritorio / minimizar todo)",
+                delay_before_s=0.5,
+            ),
+            Step(
+                tipo=StepType.SLEEP,
+                valor="1.0",
+                descripcion="Espera 1s a que se aplique Win+D",
+                delay_before_s=0.0,
+            ),
+            Step(
+                tipo=StepType.WINDOW_ENSURE,
+                titulo=titulo,
+                extra={"state": "maximized"},
+                timeout_s=10.0,
+                descripcion=f"Traer al frente + maximizar: {titulo}",
+                delay_before_s=0.5,
+            ),
+        ]
+        # Insertar al PRINCIPIO de la macro
+        self.macro.pasos = nuevos + self.macro.pasos
+        # Y, ya que estamos, sugerimos rellenar la ventana_principal
+        if not self.ventana.text().strip():
+            self.ventana.setText(titulo)
+        self._refresh_table()
+        QMessageBox.information(
+            self, "Plantilla añadida",
+            f"Insertados 3 pasos al principio de la macro:\n"
+            f"  1. Win+D (minimizar todo)\n"
+            f"  2. Sleep 1s\n"
+            f"  3. window_ensure '{titulo}' (maximizar al frente)\n\n"
+            f"He puesto también '{titulo}' como Ventana principal (si estaba vacía).",
+        )
 
     def _on_macro_recorded(self, macro: Macro):
         if not macro or not macro.pasos:
