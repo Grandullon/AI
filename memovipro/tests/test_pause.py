@@ -58,6 +58,7 @@ def test_abort_desbloquea_pausa():
     p = Player.__new__(Player)
     p._abort = threading.Event()
     p._paused = threading.Event()
+    p._step_continue = threading.Event()
     p._paused.set()
 
     resultado = {"completado": False}

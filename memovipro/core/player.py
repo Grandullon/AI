@@ -53,6 +53,7 @@ class Player:
         on_status: Callable[[RunStatus], None] | None = None,
         dry_run: bool = False,
         velocidad: float = 1.0,
+        step_mode: bool = False,
     ):
         self.macro = macro
         self.screenshots_dir = Path(screenshots_dir)
@@ -78,11 +79,20 @@ class Player:
         # Pausa solicitada externamente (panel de control). El loop principal
         # se queda esperando aquí sin avanzar.
         self._paused = threading.Event()
+        # Modo step-through: si True, el loop bloquea antes de cada paso
+        # esperando a que alguien llame a advance_step(). Usado por la
+        # pestaña Macros → "🐞 Paso a paso" para que el usuario pueda
+        # añadir nuevos pasos en mitad del recorrido.
+        self._step_mode = bool(step_mode)
+        self._step_continue = threading.Event()
+        self._step_idx: int = 0
 
     def abort(self) -> None:
         self._abort.set()
         # Si está pausado, despertar para que vea el abort.
         self._paused.clear()
+        # En modo step, desbloquear el wait inmediatamente.
+        self._step_continue.set()
 
     def pause(self) -> None:
         """Solicita pausa. El loop esperará antes del siguiente paso."""
@@ -97,10 +107,28 @@ class Player:
     def is_paused(self) -> bool:
         return self._paused.is_set()
 
+    def advance_step(self) -> None:
+        """En modo step-through, indica al loop que avance al siguiente paso."""
+        self._step_continue.set()
+
+    def step_index(self) -> int:
+        """Índice del paso actualmente apuntado (0-based)."""
+        return self._step_idx
+
     def _esperar_si_pausado(self) -> None:
         """Bloquea (con tramos cortos) mientras esté pausado."""
         while self._paused.is_set() and not self._abort.is_set():
             time.sleep(0.1)
+
+    def _esperar_step(self) -> None:
+        """En modo step, espera a que advance_step() / abort() suelte el wait."""
+        if not self._step_mode:
+            return
+        self._step_continue.clear()
+        # Timeout largo: 1h. Si en una hora no se ha pulsado "Siguiente"
+        # ni "Parar", asumimos abandono.
+        self._step_continue.wait(timeout=3600.0)
+        self._step_continue.clear()
 
     def _on_popup(self, evt: PopupEvent) -> None:
         with self._popup_lock:
@@ -136,15 +164,29 @@ class Player:
             if self.macro.auto_anchor and self.macro.ventana_principal:
                 self._asegurar_ventana_objetivo(force=True)
 
-            for idx, paso in enumerate(self.macro.pasos):
+            # Bucle con índice dinámico (en vez de for+enumerate) para
+            # soportar inserción/borrado en self.macro.pasos durante la
+            # ejecución (caso del step-through: el usuario añade pasos
+            # nuevos en mitad del flujo).
+            self._step_idx = 0
+            while self._step_idx < len(self.macro.pasos):
+                idx = self._step_idx
+                paso = self.macro.pasos[idx]
                 if self._abort.is_set():
                     break
-                # Esperar si está en pausa (puede tardar mucho — el usuario
-                # se ha ido a tomar café entre paso y paso).
+                # Esperar si está en pausa.
                 self._esperar_si_pausado()
                 if self._abort.is_set():
                     break
+                # En modo step, esperar a que el usuario pulse "Siguiente".
+                # Notificamos ANTES del wait para que la UI pueda mostrar
+                # qué paso está a punto de ejecutarse.
                 paso_render = render_step(paso, ctx)
+                if self._step_mode and self.on_status:
+                    self.on_status(RunStatus(dni=dni, paso_idx=idx, descripcion=paso_render.descripcion or paso_render.tipo.value))
+                self._esperar_step()
+                if self._abort.is_set():
+                    break
                 # Respetar el delay grabado, ajustado por velocidad.
                 self._esperar_delay(paso_render)
                 if self._abort.is_set():
@@ -153,16 +195,15 @@ class Player:
                 if self.macro.auto_anchor and self.macro.ventana_principal:
                     self._asegurar_ventana_objetivo()
                 # Ajustar modificadores pulsados al objetivo del paso.
-                # Mantiene Ctrl/Shift/Alt presionados continuamente cuando
-                # varios pasos consecutivos los necesitan (multi-selección).
                 target_mods = self._target_modifiers(paso_render)
                 self._adjust_modifiers(target_mods)
-                if self.on_status:
+                if not self._step_mode and self.on_status:
                     self.on_status(RunStatus(dni=dni, paso_idx=idx, descripcion=paso_render.descripcion or paso_render.tipo.value))
                 try:
                     self._ejecutar_paso(paso_render, idx)
                 except StepFailed as exc:
                     if paso.opcional:
+                        self._step_idx += 1
                         continue
                     inc = self._registrar_fallo(dni, idx, paso_render, exc)
                     incidencias.append(inc)
@@ -173,6 +214,11 @@ class Player:
                     inc = self._registrar_popup(dni, idx, paso_render, evt)
                     incidencias.append(inc)
                     return False, incidencias
+
+                # Avanzar al siguiente paso (si durante la ejecución se
+                # insertaron pasos en macro.pasos en posición idx+1, el
+                # bucle los recogerá automáticamente).
+                self._step_idx += 1
 
             return True, incidencias
         finally:

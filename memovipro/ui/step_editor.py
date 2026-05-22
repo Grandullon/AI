@@ -75,6 +75,7 @@ class StepEditor(QWidget):
             ("Bajar", lambda: self._move(1), None),
             ("Inspector", self._launch_inspector, None),
             ("⚡ Plantilla arranque", self._insertar_plantilla_arranque, "#8e44ad"),
+            ("🐞 Paso a paso", self._launch_step_through, "#16a085"),
             ("Cargar YAML", self._load, None),
             ("Guardar YAML", self._save, None),
         ]
@@ -230,6 +231,58 @@ class StepEditor(QWidget):
             self._on_macro_recorded(dlg.macro)
         elif result == QDialog.DialogCode.Accepted:
             QMessageBox.information(self, "Grabación", "No se capturó ningún paso.")
+
+    def _launch_step_through(self):
+        """Lanza el depurador paso a paso (step-through) sobre la macro.
+
+        Abre un panel flotante con la info del paso actual y botones
+        ▶ Siguiente / 🔴 Grabar aquí / ⏹. Minimiza MemoviPro mientras
+        dura. Si el usuario inserta pasos nuevos con "Grabar aquí",
+        se añaden a la macro en posición idx+1 y la tabla se refresca.
+        """
+        self._sync_from_form()
+        if not self.macro.pasos:
+            QMessageBox.warning(self, "Macro vacía", "Añade o graba pasos antes de usar paso a paso.")
+            return
+        # Resolver dirs de runtime relativos a la app
+        from pathlib import Path
+        root_app = Path(__file__).resolve().parents[1]
+        data_dir = root_app / "data"
+        screenshots_dir = data_dir / "screenshots"
+        screenshots_dir.mkdir(parents=True, exist_ok=True)
+
+        from .step_through_panel import StepThroughPanel
+        self._step_panel = StepThroughPanel(
+            macro=self.macro,
+            screenshots_dir=screenshots_dir,
+            data_dir=data_dir,
+            on_macro_modified=self._refresh_table,
+            parent=self,
+        )
+        self._step_panel.finished.connect(self._on_step_through_finished)
+
+        # Minimizar MemoviPro para no estorbar a la app que se depura
+        main_win = self.window()
+        self._main_was_visible = main_win is not None and main_win.isVisible()
+        if main_win is not None:
+            try:
+                main_win.showMinimized()
+            except Exception:
+                pass
+
+        self._step_panel.start()
+
+    def _on_step_through_finished(self):
+        # Restaurar MemoviPro y refrescar tabla por si se insertaron pasos.
+        main_win = self.window()
+        if main_win is not None and getattr(self, "_main_was_visible", True):
+            try:
+                main_win.showNormal()
+                main_win.raise_()
+                main_win.activateWindow()
+            except Exception:
+                pass
+        self._refresh_table()
 
     def _insertar_plantilla_arranque(self):
         """Inserta al PRINCIPIO de la macro la secuencia de arranque limpio.

@@ -48,6 +48,7 @@ class ReplayRunner:
         watchdog_activo: bool = True,
         on_status: Callable[[RunStatus], None] | None = None,
         on_iter_done: Callable[[int, bool, str], None] | None = None,
+        step_mode: bool = False,
     ):
         self.macro = macro
         self.veces = max(1, int(veces))
@@ -56,14 +57,12 @@ class ReplayRunner:
         self.data_dir = Path(data_dir)
         self.log_path = default_log_path(self.data_dir)
         self.excel_logger = ExcelLogger(self.log_path)
-        # Si el watchdog está desactivado, ponemos un polling tan alto que
-        # efectivamente nunca lo dispara. La instancia del thread aún existe
-        # pero no consume CPU. Más sencillo que cambiar la API del Player.
         self.polling_watchdog_ms = polling_watchdog_ms if watchdog_activo else 60_000
         self.watchdog_activo = watchdog_activo
         self.ignorar_popups = ignorar_popups or []
         self.on_status = on_status
         self.on_iter_done = on_iter_done
+        self.step_mode = bool(step_mode)
         self._abort = threading.Event()
         self._player: Player | None = None
 
@@ -79,6 +78,17 @@ class ReplayRunner:
     def resume(self) -> None:
         if self._player:
             self._player.resume()
+
+    def advance_step(self) -> None:
+        """En modo step-through, indica al player que avance al siguiente paso."""
+        if self._player:
+            self._player.advance_step()
+
+    @property
+    def player(self) -> Player | None:
+        """Acceso al Player en curso (para inserciones de pasos en
+        runtime desde la UI de step-through)."""
+        return self._player
 
     def run(self) -> ReplaySummary:
         ok_list: list[int] = []
@@ -101,6 +111,7 @@ class ReplayRunner:
                 on_status=self.on_status,
                 dry_run=False,
                 velocidad=self.velocidad,
+                step_mode=self.step_mode,
             )
             try:
                 exito, incidencias = self._player.ejecutar_dni(ctx)
