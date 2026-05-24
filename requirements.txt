@@ -1,0 +1,7 @@
+requests
+feedparser
+gspread
+google-auth
+google-auth-oauthlib
+python-dotenv
+anthropic
