@@ -189,6 +189,12 @@ class Player:
                 self._esperar_step()
                 if self._abort.is_set():
                     break
+                # Control de flujo: IF_VENTANA decide cuántos pasos avanzar
+                # (ejecutar el bloque "then" o saltarlo). No es una acción
+                # de UI, así que se resuelve aquí y saltamos el resto.
+                if paso_render.tipo == StepType.IF_VENTANA:
+                    self._step_idx += self._evaluar_if(paso_render)
+                    continue
                 # Respetar el delay grabado, ajustado por velocidad.
                 self._esperar_delay(paso_render)
                 if self._abort.is_set():
@@ -464,6 +470,36 @@ class Player:
         win = Desktop(backend="uia").window(title_re=f".*{titulo}.*")
         win.wait("visible", timeout=timeout_s)
         win.set_focus()
+
+    def _evaluar_if(self, paso: Step) -> int:
+        """Evalúa un paso IF_VENTANA y devuelve cuántas posiciones avanzar.
+
+        extra:
+          - ventana: patrón de título (regex parcial)
+          - negar: si True, la condición es "NO existe la ventana"
+          - saltar_si_no: nº de pasos del bloque "then" a saltar si la
+            condición NO se cumple.
+
+        Devuelve:
+          - 1  → la condición se cumple: ejecutar el bloque siguiente.
+          - 1 + saltar_si_no → no se cumple: saltar el bloque.
+        """
+        extra = paso.extra or {}
+        patron = str(extra.get("ventana", ""))
+        negar = bool(extra.get("negar", False))
+        saltar = max(0, int(extra.get("saltar_si_no", 0)))
+        if self.dry_run:
+            logger.info("[dry-run] if_ventana '{}' negar={} saltar={}", patron, negar, saltar)
+            return 1
+        from .window_utils import existe_ventana
+        existe = existe_ventana(patron, timeout_s=0.5) if patron else False
+        condicion = (existe != negar)  # XOR: negar invierte
+        logger.info(
+            "if_ventana '{}': existe={} negar={} → condicion={} ({})",
+            patron, existe, negar, condicion,
+            "ejecuta bloque" if condicion else f"salta {saltar} pasos",
+        )
+        return 1 if condicion else (1 + saltar)
 
     def _esperar_aparezca_ventana(self, title_re: str, timeout_s: float) -> bool:
         """Espera (polling) a que exista una ventana que matchee el patrón.

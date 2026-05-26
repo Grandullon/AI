@@ -204,6 +204,12 @@ class StepEditor(QWidget):
         if row < 0:
             return
         paso = self.macro.pasos[row]
+
+        # IF_VENTANA tiene un editor propio (patrón + negar + nº pasos a saltar)
+        if paso.tipo == StepType.IF_VENTANA:
+            self._edit_if_ventana(paso)
+            return
+
         text, ok = QInputDialog.getText(self, "Editar valor", "Valor / título:", text=paso.valor or paso.titulo or "")
         if not ok:
             return
@@ -211,6 +217,39 @@ class StepEditor(QWidget):
             paso.titulo = text
         else:
             paso.valor = text
+        self._refresh_table()
+
+    def _edit_if_ventana(self, paso: Step):
+        """Editor de un paso condicional IF_VENTANA."""
+        extra = paso.extra or {}
+        patron, ok = QInputDialog.getText(
+            self, "Condicional: ventana",
+            "Título de la ventana a comprobar (regex parcial):\n"
+            "Ej: 'Error' o 'Sin datos|No hay registros'",
+            text=str(extra.get("ventana", "")),
+        )
+        if not ok:
+            return
+        items = ["SÍ existe la ventana", "NO existe la ventana"]
+        modo, ok2 = QInputDialog.getItem(
+            self, "Condición",
+            "Ejecutar el bloque siguiente cuando:",
+            items, 1 if extra.get("negar") else 0, False,
+        )
+        if not ok2:
+            return
+        negar = (modo == items[1])
+        saltar, ok3 = QInputDialog.getInt(
+            self, "Bloque condicional",
+            "¿Cuántos pasos siguientes forman el bloque 'entonces'?\n"
+            "(se ejecutan si se cumple la condición, se saltan si no)",
+            int(extra.get("saltar_si_no", 1)), 0, 50,
+        )
+        if not ok3:
+            return
+        paso.extra = {"ventana": patron.strip(), "negar": negar, "saltar_si_no": saltar}
+        cond_txt = "NO existe" if negar else "existe"
+        paso.descripcion = f"SI {cond_txt} '{patron.strip()}' → ejecuta {saltar} pasos"
         self._refresh_table()
 
     def _edit_verificacion(self):

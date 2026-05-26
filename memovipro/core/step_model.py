@@ -27,6 +27,8 @@ class StepType(str, Enum):
     SCROLL = "scroll"                # Rueda del ratón (vertical / horizontal)
     DRAG = "drag"                    # Arrastrar de (x1,y1) a (x2,y2)
     LAUNCH_PROGRAM = "launch_program"  # Ejecuta un .exe / shortcut / comando
+    IF_VENTANA = "if_ventana"        # Condicional: si existe (o no) una ventana,
+                                     # ejecuta el bloque siguiente o lo salta
 
 
 @dataclass
