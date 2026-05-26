@@ -1,0 +1,82 @@
+name: Release MemoviPro Windows .exe
+
+# Compila los .exe y los publica como adjuntos de una Release de GitHub.
+# A diferencia de los artifacts de Actions (que caducan a los 30 días),
+# los adjuntos de una Release son permanentes.
+#
+# Dos formas de lanzarlo:
+#   1. Empujar una etiqueta de versión:  git tag v1.0.0 && git push origin v1.0.0
+#   2. Manualmente desde la pestaña Actions → "Run workflow", indicando la
+#      versión (p. ej. v1.0.0). Se creará la etiqueta sobre el commit actual.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versión a publicar (etiqueta), p. ej. v1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Compilar y publicar Release
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: memovipro
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: memovipro/requirements.txt
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller pytest
+
+      - name: Tests
+        run: pytest tests/ -v
+
+      - name: Compilar memovipro-run.exe (CLI)
+        run: pyinstaller memovipro-run.spec --clean --noconfirm
+
+      - name: Compilar memovipro-gui.exe (GUI)
+        run: pyinstaller memovipro-gui.spec --clean --noconfirm
+
+      - name: Empaquetar todo en un .zip
+        shell: pwsh
+        run: |
+          $ver = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.version }}' } else { '${{ github.ref_name }}' }
+          New-Item -ItemType Directory -Force -Path paquete | Out-Null
+          Copy-Item dist/*.exe paquete/
+          Copy-Item -Recurse macros paquete/macros -ErrorAction SilentlyContinue
+          Copy-Item config.json paquete/ -ErrorAction SilentlyContinue
+          Copy-Item RunMacro.ps1 paquete/ -ErrorAction SilentlyContinue
+          Copy-Item RepartoPA.ps1 paquete/ -ErrorAction SilentlyContinue
+          Copy-Item README.md paquete/ -ErrorAction SilentlyContinue
+          Compress-Archive -Path paquete/* -DestinationPath "memovipro-$ver.zip" -Force
+
+      - name: Publicar Release con los .exe adjuntos
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+          name: MemoviPro ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+          generate_release_notes: true
+          files: |
+            memovipro/dist/memovipro-run.exe
+            memovipro/dist/memovipro-gui.exe
+            memovipro/memovipro-*.zip
