@@ -323,14 +323,14 @@ class Recorder:
         for lst in listeners:
             try:
                 lst.stop()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Fallo al detener un listener de captura: {}", exc)
         for lst in listeners:
             try:
                 if lst.is_alive():
                     lst.join(timeout=2.0)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Fallo al esperar (join) a un listener de captura: {}", exc)
         self._mouse_listener = None
         self._kb_listener = None
         with self._lock:

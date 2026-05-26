@@ -12,6 +12,14 @@ try:
 except Exception:
     _HAS_PYWINAUTO = False
 
+try:
+    from loguru import logger
+except Exception:
+    class _NullLogger:
+        def debug(self, *a, **kw): pass
+        def warning(self, *a, **kw): pass
+    logger = _NullLogger()
+
 from .screenshot import capturar_ventana_pywinauto
 
 
@@ -259,6 +267,6 @@ class PopupWatchdog(threading.Thread):
                         if self.cerrar_automaticamente:
                             _cerrar_popup(w)
                         self._baseline.add(h)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Iteración del watchdog de popups falló: {}", exc)
             time.sleep(self.polling_ms / 1000.0)

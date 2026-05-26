@@ -254,8 +254,8 @@ class Player:
             # Soltar siempre cualquier modificador que hayamos dejado pulsado.
             try:
                 self._adjust_modifiers(set())
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("No se pudieron soltar los modificadores al finalizar: {}", exc)
             if self._watchdog:
                 self._watchdog.stop()
                 self._watchdog.join(timeout=1.0)
@@ -572,8 +572,8 @@ class Player:
                 if ctrl.exists(timeout=0.3):
                     try:
                         ctrl.wait("visible enabled", timeout=min(paso.timeout_s, 3.0))
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Control encontrado pero no visible/enabled a tiempo: {}", exc)
                     return ctrl
             except Exception as exc:
                 last_err = exc

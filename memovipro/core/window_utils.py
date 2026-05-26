@@ -143,27 +143,27 @@ def asegurar_ventana(
     try:
         if win.is_minimized() and state != "minimized":
             win.restore()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("No se pudo restaurar la ventana '{}': {}", title_re, exc)
     if state == "maximized":
         try:
             if not win.is_maximized():
                 win.maximize()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("No se pudo maximizar la ventana '{}': {}", title_re, exc)
     elif state == "minimized":
         try:
             win.minimize()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("No se pudo minimizar la ventana '{}': {}", title_re, exc)
     elif state == "normal":
         try:
             if win.is_maximized() or win.is_minimized():
                 win.restore()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("No se pudo poner en estado normal la ventana '{}': {}", title_re, exc)
     try:
         win.set_focus()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("No se pudo poner foco en la ventana '{}': {}", title_re, exc)
     return True, f"Encontrada y traída al frente: '{titulo_real}'"
