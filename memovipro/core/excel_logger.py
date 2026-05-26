@@ -92,8 +92,14 @@ class ExcelLogger:
             ws.column_dimensions[get_column_letter(i)].width = w
 
     def append(self, inc: Incidencia) -> int:
-        """Añade una incidencia. Devuelve el número de fila escrita."""
-        with self._lock:
+        """Añade una incidencia. Devuelve el número de fila escrita.
+
+        Protegido con un lock intra-proceso (threading) Y entre procesos
+        (file_lock) para que una tarea programada y la GUI no corrompan
+        el Excel escribiendo a la vez.
+        """
+        from .file_lock import file_lock
+        with self._lock, file_lock(self.path):
             wb = load_workbook(self.path)
             ws = wb["Incidencias"]
             row = inc.row()

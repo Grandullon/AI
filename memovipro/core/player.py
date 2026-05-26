@@ -578,7 +578,10 @@ class Player:
         elif self.dry_run:
             logger.info('[dry-run] type_text "{}"', paso.valor)
             return
-        pwkeyboard.send_keys(paso.valor or "", with_spaces=True, pause=0.02)
+        from .keyboard_utils import escape_send_keys
+        # Escapar { } ( ) + ^ % ~ para teclear el texto LITERAL (no como
+        # sintaxis de send_keys). Crítico para contraseñas con símbolos.
+        pwkeyboard.send_keys(escape_send_keys(paso.valor or ""), with_spaces=True, pause=0.02)
 
     def _wait_until(self, paso: Step) -> None:
         cond = paso.extra.get("condicion") or {}

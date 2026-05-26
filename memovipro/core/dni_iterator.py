@@ -92,11 +92,15 @@ class Checkpoint:
             self._data = cargado
 
     def _save(self) -> None:
+        from .file_lock import file_lock
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        with tmp.open("w", encoding="utf-8") as f:
-            json.dump(self._data, f, indent=2, ensure_ascii=False)
-        tmp.replace(self.path)
+        # Lock entre procesos: la GUI y una tarea programada podrían
+        # escribir el mismo checkpoint a la vez.
+        with file_lock(self.path):
+            tmp = self.path.with_suffix(".tmp")
+            with tmp.open("w", encoding="utf-8") as f:
+                json.dump(self._data, f, indent=2, ensure_ascii=False)
+            tmp.replace(self.path)
 
     def marcar_ok(self, dni: str) -> None:
         if dni not in self._data["ok"]:
