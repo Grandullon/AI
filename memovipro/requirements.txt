@@ -8,3 +8,5 @@ mss>=9.0
 Pillow>=10.0
 loguru>=0.7
 keyring>=24.0
+numpy>=1.24
+opencv-python-headless>=4.8

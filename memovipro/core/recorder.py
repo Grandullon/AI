@@ -77,6 +77,7 @@ class EventoCrudo:
     valor: str = ""
     descripcion: str = ""
     timestamp: float = 0.0
+    img_png: bytes | None = None  # thumbnail PNG alrededor del clic (matching)
 
 
 # Distancia mínima en píxeles para considerar que un press+release es un drag,
@@ -357,12 +358,23 @@ class Recorder:
             return
         btn = _button_corto(button)
         if pressed:
+            # Capturar el thumbnail alrededor del punto ANTES del efecto del
+            # clic (best-effort, rápido). Se usará como fallback de matching
+            # por imagen al reproducir. Solo se conserva si el evento acaba
+            # siendo un click (no un drag).
+            img = None
+            try:
+                from .image_match import capturar_region_png
+                img = capturar_region_png(int(x), int(y))
+            except Exception:
+                img = None
             with self._lock:
                 self._press_pendiente = {
                     "x": int(x), "y": int(y),
                     "button": btn,
                     "modifiers": _modifiers_str(self._modifiers),
                     "timestamp": time.time(),
+                    "img_png": img,
                 }
             return
         # ----- Release -----
@@ -412,6 +424,7 @@ class Recorder:
             modifiers=mods,
             descripcion=self._descripcion_click(x, y, btn, mods, double=False),
             timestamp=ahora,
+            img_png=pendiente.get("img_png"),
         ))
 
     def _emitir_drag(self, pendiente: dict, x_release: int, y_release: int) -> None:
@@ -596,10 +609,19 @@ class Recorder:
                 mods_label = evt.modifiers.upper() + " " if evt.modifiers else ""
                 accion = "Doble click" if evt.double else "Click"
                 btn_suffix = "" if evt.button == "left" else f" [{evt.button}]"
+                img_b64 = ""
+                if evt.img_png:
+                    try:
+                        from .image_match import png_a_b64
+                        img_b64 = png_a_b64(evt.img_png)
+                    except Exception:
+                        img_b64 = ""
                 if sel is not None:
                     extra: dict = {"fallback_xy": [evt.x, evt.y]}
                     if win_rel:
                         extra["win_rel"] = win_rel
+                    if img_b64:
+                        extra["img_b64"] = img_b64
                     if evt.button != "left":
                         extra["button"] = evt.button
                     if evt.double:
@@ -617,6 +639,8 @@ class Recorder:
                     extra = {"x": evt.x, "y": evt.y}
                     if win_rel:
                         extra["win_rel"] = win_rel
+                    if img_b64:
+                        extra["img_b64"] = img_b64
                     if evt.button != "left":
                         extra["button"] = evt.button
                     if evt.double:

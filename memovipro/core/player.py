@@ -596,14 +596,16 @@ class Player:
         extra = paso.extra or {}
         fallback = extra.get("fallback_xy")
         win_rel = extra.get("win_rel")
+        img_b64 = extra.get("img_b64")
         button = str(extra.get("button", "left"))
         double = bool(extra.get("double", False))
 
         # Sin ventana_principal: usar la mejor estrategia disponible.
-        # Orden: coordenadas relativas a ventana (sobreviven a mover/
-        # redimensionar/DPI) → coordenadas absolutas.
+        # Orden: relativas a ventana → matching por imagen → absolutas.
         if not self.macro.ventana_principal:
             if win_rel and self._click_window_relative(win_rel, button=button, double=double):
+                return
+            if img_b64 and self._click_imagen(img_b64, button=button, double=double):
                 return
             if fallback and len(fallback) == 2:
                 x, y = int(fallback[0]), int(fallback[1])
@@ -613,9 +615,12 @@ class Player:
         try:
             ctrl = self._resolve_control(paso)
         except Exception as exc:
-            # Fallback en cascada: relativa a ventana → absoluta.
+            # Fallback en cascada: relativa a ventana → imagen → absoluta.
             if win_rel and self._click_window_relative(win_rel, button=button, double=double):
                 logger.warning("Selector no resuelto, fallback a coords relativas a ventana: {}", exc)
+                return
+            if img_b64 and self._click_imagen(img_b64, button=button, double=double):
+                logger.warning("Selector no resuelto, fallback a matching por imagen: {}", exc)
                 return
             if fallback and len(fallback) == 2:
                 x, y = int(fallback[0]), int(fallback[1])
@@ -677,6 +682,30 @@ class Player:
         except Exception as exc:
             logger.debug("click_window_relative falló para '{}': {}", title, exc)
             return False
+        self._click_xy(x, y, button=button, double=double)
+        return True
+
+    def _click_imagen(self, img_b64: str, button: str = "left", double: bool = False) -> bool:
+        """Busca el thumbnail en pantalla y clica en su centro.
+
+        Devuelve True si lo encontró y clicó, False si no (para seguir
+        con el siguiente fallback). El más robusto: encuentra el control
+        visualmente esté donde esté la ventana.
+        """
+        if not img_b64:
+            return False
+        if self.dry_run:
+            logger.info("[dry-run] click por imagen (matching)")
+            return True
+        try:
+            from .image_match import buscar_en_pantalla
+        except Exception:
+            return False
+        punto = buscar_en_pantalla(img_b64)
+        if punto is None:
+            return False
+        x, y = punto
+        logger.info("Matching por imagen encontró el control en ({}, {})", x, y)
         self._click_xy(x, y, button=button, double=double)
         return True
 

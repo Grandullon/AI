@@ -24,6 +24,8 @@ a = Analysis(
         'pywinauto.controls.uia_controls',
         'pynput.keyboard._win32',
         'pynput.mouse._win32',
+        'cv2',
+        'numpy',
     ],
     hookspath=[],
     hooksconfig={},
