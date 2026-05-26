@@ -215,6 +215,27 @@ class Player:
                     incidencias.append(inc)
                     return False, incidencias
 
+                # Verificación post-paso: si el paso pide esperar a que
+                # aparezca una ventana, lo hacemos. Si no aparece a tiempo,
+                # es una incidencia clara (en vez de seguir clicando en
+                # vacío y fallar 5 pasos después sin saber por qué).
+                if paso_render.verificar_ventana and not self._abort.is_set():
+                    if not self._esperar_aparezca_ventana(
+                        paso_render.verificar_ventana, paso_render.verificar_timeout_s
+                    ):
+                        if not paso.opcional:
+                            exc = StepFailed(
+                                motivo=(
+                                    f"Verificación fallida: la ventana "
+                                    f"'{paso_render.verificar_ventana}' no apareció "
+                                    f"en {paso_render.verificar_timeout_s:g}s"
+                                ),
+                                paso_idx=idx, paso=paso_render,
+                            )
+                            inc = self._registrar_fallo(dni, idx, paso_render, exc)
+                            incidencias.append(inc)
+                            return False, incidencias
+
                 # Avanzar al siguiente paso (si durante la ejecución se
                 # insertaron pasos en macro.pasos en posición idx+1, el
                 # bucle los recogerá automáticamente).
@@ -441,6 +462,30 @@ class Player:
         win = Desktop(backend="uia").window(title_re=f".*{titulo}.*")
         win.wait("visible", timeout=timeout_s)
         win.set_focus()
+
+    def _esperar_aparezca_ventana(self, title_re: str, timeout_s: float) -> bool:
+        """Espera (polling) a que exista una ventana que matchee el patrón.
+
+        Devuelve True si aparece, False si se agota el timeout. Si no hay
+        pywinauto (no Windows), devuelve True para no bloquear (no podemos
+        verificar). Respeta abort.
+        """
+        if self.dry_run:
+            logger.info("[dry-run] verificar ventana '{}'", title_re)
+            return True
+        from .window_utils import existe_ventana, _HAS_PYWINAUTO as _HAS
+        if not _HAS:
+            return True
+        fin = time.time() + max(0.5, timeout_s)
+        while time.time() < fin:
+            if self._abort.is_set():
+                return False
+            if existe_ventana(title_re, timeout_s=0.3):
+                logger.debug("Verificación OK: apareció '{}'", title_re)
+                return True
+            time.sleep(0.3)
+        logger.warning("Verificación: '{}' NO apareció en {}s", title_re, timeout_s)
+        return False
 
     def _resolve_control(self, paso: Step):
         """Resuelve el control objetivo por selector simbólico.

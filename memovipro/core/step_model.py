@@ -53,6 +53,12 @@ class Step:
     descripcion: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
     delay_before_s: float = 0.0  # segundos de espera antes de ejecutar este paso
+    # Verificación post-paso: tras ejecutar el paso, esperar a que
+    # aparezca una ventana cuyo título matchee este patrón (regex
+    # parcial). Si no aparece en verificar_timeout_s, el paso se marca
+    # como fallido → incidencia clara en vez de fallo en cascada.
+    verificar_ventana: str = ""
+    verificar_timeout_s: float = 10.0
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"tipo": self.tipo.value}
@@ -70,6 +76,10 @@ class Step:
             d["reintentos"] = self.reintentos
         if self.opcional:
             d["opcional"] = True
+        if self.verificar_ventana:
+            d["verificar_ventana"] = self.verificar_ventana
+            if self.verificar_timeout_s != 10.0:
+                d["verificar_timeout_s"] = self.verificar_timeout_s
         if self.descripcion:
             d["descripcion"] = self.descripcion
         if self.extra:
@@ -91,6 +101,8 @@ class Step:
             descripcion=d.get("descripcion", ""),
             extra=dict(d.get("extra", {})),
             delay_before_s=float(d.get("delay_before_s", 0.0)),
+            verificar_ventana=d.get("verificar_ventana", ""),
+            verificar_timeout_s=float(d.get("verificar_timeout_s", 10.0)),
         )
 
 
@@ -245,4 +257,6 @@ def render_step(step: Step, ctx: dict[str, str]) -> Step:
         descripcion=step.descripcion,
         extra={k: render_placeholders(v, ctx) if isinstance(v, str) else v for k, v in step.extra.items()},
         delay_before_s=step.delay_before_s,
+        verificar_ventana=render_placeholders(step.verificar_ventana, ctx) if step.verificar_ventana else "",
+        verificar_timeout_s=step.verificar_timeout_s,
     )

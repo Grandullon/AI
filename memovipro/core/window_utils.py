@@ -92,6 +92,17 @@ def listar_ventanas_visibles(excluir_propio: bool = True) -> list[VentanaInfo]:
     return out
 
 
+def existe_ventana(title_re: str, timeout_s: float = 0.5) -> bool:
+    """¿Existe alguna ventana cuyo título matchee el patrón (regex parcial)?"""
+    if not _HAS_PYWINAUTO or not title_re:
+        return False
+    try:
+        win = Desktop(backend="uia").window(title_re=f".*{title_re}.*")
+        return bool(win.exists(timeout=timeout_s))
+    except Exception:
+        return False
+
+
 def asegurar_ventana(
     title_re: str,
     state: str = "maximized",

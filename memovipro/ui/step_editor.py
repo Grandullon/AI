@@ -70,6 +70,7 @@ class StepEditor(QWidget):
             ("🔴 Grabar", self._launch_recorder, "#c0392b"),
             ("Añadir paso", self._add_step, None),
             ("Editar valor", self._edit_value, None),
+            ("✓ Verificación", self._edit_verificacion, None),
             ("Eliminar", self._remove_step, None),
             ("Subir", lambda: self._move(-1), None),
             ("Bajar", lambda: self._move(1), None),
@@ -104,6 +105,9 @@ class StepEditor(QWidget):
                     sel_txt = f"[{paso.selector.control_type}] {sel_txt}"
             valor = paso.valor or paso.titulo or ""
             espera = f"{paso.delay_before_s:.2f}" if paso.delay_before_s > 0 else ""
+            desc = paso.descripcion
+            if paso.verificar_ventana:
+                desc = f"{desc}  ✓verifica:'{paso.verificar_ventana}'"
             valores = [
                 str(i + 1),
                 paso.tipo.value,
@@ -112,7 +116,7 @@ class StepEditor(QWidget):
                 espera,
                 f"{paso.timeout_s:g}",
                 "✓" if paso.opcional else "",
-                paso.descripcion,
+                desc,
             ]
             for col, v in enumerate(valores):
                 item = QTableWidgetItem(v)
@@ -207,6 +211,35 @@ class StepEditor(QWidget):
             paso.titulo = text
         else:
             paso.valor = text
+        self._refresh_table()
+
+    def _edit_verificacion(self):
+        """Configura la verificación post-paso del paso seleccionado:
+        tras ejecutarlo, esperar a que aparezca una ventana. Si no
+        aparece, se marca como incidencia."""
+        row = self.tabla.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Selecciona un paso", "Pincha primero en una fila.")
+            return
+        paso = self.macro.pasos[row]
+        text, ok = QInputDialog.getText(
+            self, "Verificación post-paso",
+            "Tras este paso, esperar a que aparezca la ventana con título "
+            "(regex parcial). Déjalo vacío para no verificar.\n"
+            "Ej: 'INFORMES' o 'INFORMES|FABPINF01'",
+            text=paso.verificar_ventana,
+        )
+        if not ok:
+            return
+        paso.verificar_ventana = text.strip()
+        if paso.verificar_ventana:
+            seg, ok2 = QInputDialog.getInt(
+                self, "Timeout de verificación",
+                "Segundos máximos a esperar a que aparezca la ventana:",
+                int(paso.verificar_timeout_s), 1, 120,
+            )
+            if ok2:
+                paso.verificar_timeout_s = float(seg)
         self._refresh_table()
 
     def _remove_step(self):
