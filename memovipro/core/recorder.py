@@ -192,18 +192,49 @@ def _modifiers_str(mods: set[str]) -> str:
     return "+".join(presentes)
 
 
-def _selector_desde_punto(x: int, y: int) -> tuple[Selector | None, str]:
-    """Resuelve (x,y) a un selector simbólico vía UI Automation.
+def _ventana_relativa_desde_punto(elem, x: int, y: int) -> dict | None:
+    """Calcula la posición del clic relativa a la ventana top-level.
 
-    Devuelve (selector_o_None, descripción). Si falla cualquier paso,
-    devuelve (None, "(x,y)") para que el llamador caiga a click_at_xy.
+    Devuelve {"title", "fx", "fy"} donde fx/fy son fracciones [0..1] del
+    ancho/alto de la ventana. Guardar fracciones (en vez de píxeles
+    absolutos) hace que el clic sobreviva a que la ventana se mueva,
+    cambie de tamaño o de escalado DPI (porque el rect físico de la
+    ventana escala con el DPI).
+    """
+    try:
+        top = elem.top_level_parent()
+        r = top.rectangle()
+        w = r.width()
+        h = r.height()
+        if w <= 0 or h <= 0:
+            return None
+        titulo = (top.window_text() or "").strip()
+        if not titulo:
+            return None
+        fx = (x - r.left) / w
+        fy = (y - r.top) / h
+        # Solo tiene sentido si el punto cae dentro de la ventana
+        if not (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0):
+            return None
+        return {"title": titulo, "fx": round(fx, 4), "fy": round(fy, 4)}
+    except Exception:
+        return None
+
+
+def _selector_desde_punto(x: int, y: int) -> tuple[Selector | None, str, dict | None]:
+    """Resuelve (x,y) a un selector simbólico + posición relativa a ventana.
+
+    Devuelve (selector_o_None, descripción, win_rel_o_None). win_rel es
+    {"title", "fx", "fy"} para el fallback robusto a coordenadas relativas.
+    Si falla cualquier paso, los campos correspondientes son None.
     """
     if not _HAS_PYWINAUTO:
-        return None, f"({x},{y})"
+        return None, f"({x},{y})", None
     try:
         elem = Desktop(backend="uia").from_point(x, y)
     except Exception:
-        return None, f"({x},{y})"
+        return None, f"({x},{y})", None
+    win_rel = _ventana_relativa_desde_punto(elem, x, y)
     try:
         name = (elem.window_text() or "").strip()
     except Exception:
@@ -227,9 +258,9 @@ def _selector_desde_punto(x: int, y: int) -> tuple[Selector | None, str]:
         class_name=class_name or None,
     )
     if sel.is_empty():
-        return None, f"({x},{y})"
+        return None, f"({x},{y})", win_rel
     desc = name or ctrl_type or class_name or f"({x},{y})"
-    return sel, desc
+    return sel, desc, win_rel
 
 
 class Recorder:
@@ -558,14 +589,17 @@ class Recorder:
                 n_click += 1
                 sel = None
                 desc = evt.descripcion
+                win_rel = None
                 if resolver_selectores:
-                    sel, desc = _selector_desde_punto(evt.x, evt.y)
+                    sel, desc, win_rel = _selector_desde_punto(evt.x, evt.y)
                 # Prefijos para la descripción del paso
                 mods_label = evt.modifiers.upper() + " " if evt.modifiers else ""
                 accion = "Doble click" if evt.double else "Click"
                 btn_suffix = "" if evt.button == "left" else f" [{evt.button}]"
                 if sel is not None:
                     extra: dict = {"fallback_xy": [evt.x, evt.y]}
+                    if win_rel:
+                        extra["win_rel"] = win_rel
                     if evt.button != "left":
                         extra["button"] = evt.button
                     if evt.double:
@@ -581,6 +615,8 @@ class Recorder:
                     ))
                 else:
                     extra = {"x": evt.x, "y": evt.y}
+                    if win_rel:
+                        extra["win_rel"] = win_rel
                     if evt.button != "left":
                         extra["button"] = evt.button
                     if evt.double:

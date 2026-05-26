@@ -11,6 +11,8 @@ try:
     _HAS_PYWINAUTO = True
 except Exception:
     _HAS_PYWINAUTO = False
+    Desktop = None  # placeholder para tests (monkeypatch)
+    pwkeyboard = None
 
 from loguru import logger
 
@@ -557,19 +559,28 @@ class Player:
         """
         extra = paso.extra or {}
         fallback = extra.get("fallback_xy")
+        win_rel = extra.get("win_rel")
         button = str(extra.get("button", "left"))
         double = bool(extra.get("double", False))
 
-        # Sin ventana_principal: ir directo a coordenadas si las tenemos.
-        # Es más rápido y fiable que iterar todas las ventanas con UIA.
-        if not self.macro.ventana_principal and fallback and len(fallback) == 2:
-            x, y = int(fallback[0]), int(fallback[1])
-            self._click_xy(x, y, button=button, double=double)
-            return
+        # Sin ventana_principal: usar la mejor estrategia disponible.
+        # Orden: coordenadas relativas a ventana (sobreviven a mover/
+        # redimensionar/DPI) → coordenadas absolutas.
+        if not self.macro.ventana_principal:
+            if win_rel and self._click_window_relative(win_rel, button=button, double=double):
+                return
+            if fallback and len(fallback) == 2:
+                x, y = int(fallback[0]), int(fallback[1])
+                self._click_xy(x, y, button=button, double=double)
+                return
 
         try:
             ctrl = self._resolve_control(paso)
         except Exception as exc:
+            # Fallback en cascada: relativa a ventana → absoluta.
+            if win_rel and self._click_window_relative(win_rel, button=button, double=double):
+                logger.warning("Selector no resuelto, fallback a coords relativas a ventana: {}", exc)
+                return
             if fallback and len(fallback) == 2:
                 x, y = int(fallback[0]), int(fallback[1])
                 logger.warning("Selector no resuelto, fallback a ({},{}): {}", x, y, exc)
@@ -593,6 +604,45 @@ class Player:
             ctrl.double_click_input(button=button)
         else:
             ctrl.click_input(button=button)
+
+    def _click_window_relative(self, win_rel: dict, button: str = "left", double: bool = False) -> bool:
+        """Hace clic usando coordenadas relativas a una ventana.
+
+        Busca la ventana por título (regex parcial), obtiene su rectángulo
+        ACTUAL y calcula el punto absoluto a partir de las fracciones
+        fx/fy capturadas al grabar. Sobrevive a que la ventana se haya
+        movido, redimensionado o cambiado de escalado DPI.
+
+        Devuelve True si pudo clicar, False si no encontró la ventana
+        (para que el caller pase al siguiente fallback).
+        """
+        if not win_rel:
+            return False
+        title = str(win_rel.get("title", ""))
+        if not title:
+            return False
+        try:
+            fx = float(win_rel.get("fx", 0.0))
+            fy = float(win_rel.get("fy", 0.0))
+        except (TypeError, ValueError):
+            return False
+        if self.dry_run:
+            logger.info("[dry-run] click relativo a ventana '{}' fx={} fy={}", title, fx, fy)
+            return True
+        if not _HAS_PYWINAUTO:
+            return False
+        try:
+            win = Desktop(backend="uia").window(title_re=f".*{title}.*")
+            if not win.exists(timeout=1.0):
+                return False
+            r = win.rectangle()
+            x = int(r.left + fx * r.width())
+            y = int(r.top + fy * r.height())
+        except Exception as exc:
+            logger.debug("click_window_relative falló para '{}': {}", title, exc)
+            return False
+        self._click_xy(x, y, button=button, double=double)
+        return True
 
     def _click_xy(self, x: int, y: int, button: str = "left", double: bool = False) -> None:
         if self.dry_run:

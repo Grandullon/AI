@@ -55,7 +55,7 @@ def test_construir_macro_guarda_fallback_xy_en_click_control():
     original = rec_mod._selector_desde_punto
 
     def fake(x, y):
-        return Selector(control_type="Button", name="OK"), "OK"
+        return Selector(control_type="Button", name="OK"), "OK", None
 
     rec_mod._selector_desde_punto = fake
     try:
