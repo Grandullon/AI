@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .dashboard_panel import DashboardPanel
 from .incidents_view import IncidentsView
 from .pipeline_panel import PipelinePanel
 from .replay_panel import ReplayPanel
@@ -110,6 +111,7 @@ class MainWindow(QMainWindow):
             pipelines_dir=self.pipelines_dir,
         )
         self.secrets_panel = SecretsPanel(data_dir=self.data_dir)
+        self.dashboard_panel = DashboardPanel(data_dir=self.data_dir)
 
         self.tabs.addTab(self.step_editor, "Macros")
         self.tabs.addTab(self.replay_panel, "Reproducir")
@@ -118,6 +120,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.schedule_panel, "Programación")
         self.tabs.addTab(self.secrets_panel, "Secretos")
         self.tabs.addTab(self.incidents_view, "Incidencias")
+        self.tabs.addTab(self.dashboard_panel, "Dashboard")
         layout.addWidget(self.tabs)
 
         self.setStatusBar(QStatusBar())
@@ -131,6 +134,7 @@ class MainWindow(QMainWindow):
             f"Ejecución terminada — Total: {summary.total} · OK: {summary.ok} · KO: {summary.ko}"
         )
         self.incidents_view.refresh()
+        self.dashboard_panel.refresh()
         self.tabs.setCurrentWidget(self.incidents_view)
 
     def _panic(self):
