@@ -10,3 +10,4 @@ loguru>=0.7
 keyring>=24.0
 numpy>=1.24
 opencv-python-headless>=4.8
+pytesseract>=0.3.10  # requiere el binario Tesseract instalado para OCR

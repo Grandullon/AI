@@ -15,6 +15,17 @@ except Exception:
 from .screenshot import capturar_ventana_pywinauto
 
 
+def _ocr_screenshot(path: str) -> str:
+    """OCR del screenshot del popup (best-effort). "" si OCR no disponible."""
+    try:
+        from .ocr import disponible, ocr_imagen
+        if not disponible():
+            return ""
+        return ocr_imagen(path)
+    except Exception:
+        return ""
+
+
 @dataclass
 class PopupEvent:
     titulo: str
@@ -22,6 +33,7 @@ class PopupEvent:
     class_name: str
     screenshot_path: str
     handle: int | None = None
+    texto_ocr: str = ""  # texto leído por OCR del screenshot (si UIA no dio nada)
 
 
 _KEYWORDS_ERROR = (
@@ -228,12 +240,18 @@ class PopupWatchdog(threading.Thread):
                     texto = _texto_completo(w)
                     class_name = w.class_name() or ""
                     shot = capturar_ventana_pywinauto(self.screenshots_dir, w, prefijo="popup")
+                    # OCR del screenshot si UIA no dio texto accesible
+                    # (popup que es imagen / control custom).
+                    texto_ocr = ""
+                    if shot and not texto:
+                        texto_ocr = _ocr_screenshot(str(shot))
                     evt = PopupEvent(
                         titulo=titulo,
                         texto=texto,
                         class_name=class_name,
                         screenshot_path=str(shot) if shot else "",
                         handle=h,
+                        texto_ocr=texto_ocr,
                     )
                     try:
                         self.on_popup(evt)

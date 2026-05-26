@@ -822,6 +822,10 @@ class Player:
         return inc
 
     def _registrar_popup(self, dni: str, idx: int, paso: Step, evt: PopupEvent) -> Incidencia:
+        # Combinar texto accesible (UIA) con el leído por OCR si lo hubo.
+        texto = evt.texto
+        if getattr(evt, "texto_ocr", ""):
+            texto = f"{texto} [OCR: {evt.texto_ocr}]".strip() if texto else f"[OCR: {evt.texto_ocr}]"
         inc = Incidencia(
             dni=dni,
             macro=self.macro.nombre,
@@ -829,7 +833,7 @@ class Player:
             paso_tipo=paso.tipo.value,
             tipo_error="POPUP",
             titulo_popup=evt.titulo,
-            texto_popup=evt.texto,
+            texto_popup=texto,
             screenshot_path=evt.screenshot_path,
             estado="ERROR",
             detalle=f"class={evt.class_name}",
