@@ -82,6 +82,7 @@ def test_pipeline_runner_respeta_stop(monkeypatch, tmp_path):
         macros_dir=tmp_path,
         screenshots_dir=tmp_path / "shots",
         data_dir=tmp_path / "data",
+        settle_entre_macros_s=0,
     )
     summary = runner.run()
     assert len(summary.pasos_resultado) == 1   # solo m1, m2 no llegó a ejecutarse
@@ -109,7 +110,8 @@ def test_pipeline_runner_continua_si_continue(monkeypatch, tmp_path):
 
     monkeypatch.setattr(pr_mod, "ReplayRunner", FakeRunner)
     runner = pr_mod.PipelineRunner(pipeline=pipeline, macros_dir=tmp_path,
-                                   screenshots_dir=tmp_path / "s", data_dir=tmp_path / "d")
+                                   screenshots_dir=tmp_path / "s", data_dir=tmp_path / "d",
+                                   settle_entre_macros_s=0)
     summary = runner.run()
     assert len(summary.pasos_resultado) == 2
     assert summary.pasos_resultado[0].ko == 1
@@ -137,7 +139,8 @@ def test_pipeline_runner_skip_rest(monkeypatch, tmp_path):
 
     monkeypatch.setattr(pr_mod, "ReplayRunner", FakeRunner)
     runner = pr_mod.PipelineRunner(pipeline=pipeline, macros_dir=tmp_path,
-                                   screenshots_dir=tmp_path / "s", data_dir=tmp_path / "d")
+                                   screenshots_dir=tmp_path / "s", data_dir=tmp_path / "d",
+                                   settle_entre_macros_s=0)
     summary = runner.run()
     # m1 ejecutado y KO. m2 y m3 marcados como saltados.
     assert len(summary.pasos_resultado) == 3
@@ -163,7 +166,8 @@ def test_pipeline_runner_condicion_todos_ok(monkeypatch, tmp_path):
 
     monkeypatch.setattr(pr_mod, "ReplayRunner", FakeRunner)
     runner = pr_mod.PipelineRunner(pipeline=pipeline, macros_dir=tmp_path,
-                                   screenshots_dir=tmp_path / "s", data_dir=tmp_path / "d")
+                                   screenshots_dir=tmp_path / "s", data_dir=tmp_path / "d",
+                                   settle_entre_macros_s=0)
     summary = runner.run()
     assert summary.pasos_resultado[0].ko == 1
     # m2 saltado porque condición todos_ok no se cumple (m1 falló)

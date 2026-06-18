@@ -235,6 +235,10 @@ class PopupWatchdog(threading.Thread):
             try:
                 actuales = Desktop(backend="uia").windows()
                 for w in actuales:
+                    # Salir cuanto antes si nos han pedido parar (evita
+                    # solaparse con el watchdog de la siguiente macro).
+                    if self._stop_event.is_set():
+                        break
                     try:
                         h = w.handle
                     except Exception:
@@ -264,9 +268,12 @@ class PopupWatchdog(threading.Thread):
                     try:
                         self.on_popup(evt)
                     finally:
-                        if self.cerrar_automaticamente:
+                        # No cerrar si ya nos pidieron parar: el diálogo
+                        # podría pertenecer a la siguiente macro.
+                        if self.cerrar_automaticamente and not self._stop_event.is_set():
                             _cerrar_popup(w)
                         self._baseline.add(h)
             except Exception as exc:
                 logger.debug("Iteración del watchdog de popups falló: {}", exc)
-            time.sleep(self.polling_ms / 1000.0)
+            # Espera interrumpible: stop() corta el sueño de inmediato.
+            self._stop_event.wait(self.polling_ms / 1000.0)

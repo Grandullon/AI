@@ -49,6 +49,8 @@ class ReplayRunner:
         on_status: Callable[[RunStatus], None] | None = None,
         on_iter_done: Callable[[int, bool, str], None] | None = None,
         step_mode: bool = False,
+        start_idx: int = 0,
+        stop_after_idx: int | None = None,
     ):
         self.macro = macro
         self.veces = max(1, int(veces))
@@ -63,6 +65,8 @@ class ReplayRunner:
         self.on_status = on_status
         self.on_iter_done = on_iter_done
         self.step_mode = bool(step_mode)
+        self.start_idx = int(start_idx)
+        self.stop_after_idx = stop_after_idx
         self._abort = threading.Event()
         self._player: Player | None = None
 
@@ -83,6 +87,11 @@ class ReplayRunner:
         """En modo step-through, indica al player que avance al siguiente paso."""
         if self._player:
             self._player.advance_step()
+
+    def step_back(self) -> None:
+        """En modo step-through, retrocede el puntero un paso."""
+        if self._player:
+            self._player.step_back()
 
     @property
     def player(self) -> Player | None:
@@ -112,6 +121,8 @@ class ReplayRunner:
                 dry_run=False,
                 velocidad=self.velocidad,
                 step_mode=self.step_mode,
+                start_idx=self.start_idx,
+                stop_after_idx=self.stop_after_idx,
             )
             try:
                 exito, incidencias = self._player.ejecutar_dni(ctx)

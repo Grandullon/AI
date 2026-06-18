@@ -56,6 +56,8 @@ class Player:
         dry_run: bool = False,
         velocidad: float = 1.0,
         step_mode: bool = False,
+        start_idx: int = 0,
+        stop_after_idx: int | None = None,
     ):
         self.macro = macro
         self.screenshots_dir = Path(screenshots_dir)
@@ -88,6 +90,18 @@ class Player:
         self._step_mode = bool(step_mode)
         self._step_continue = threading.Event()
         self._step_idx: int = 0
+        # Ejecución de un sub-rango de pasos: "ejecutar hasta aquí" /
+        # "ejecutar desde aquí" desde el editor. start_idx es 0-based; el
+        # loop arranca ahí. stop_after_idx (0-based, inclusive) corta la
+        # ejecución tras ese paso. None = hasta el final.
+        self._start_idx: int = max(0, int(start_idx))
+        self._stop_after_idx: int | None = (
+            None if stop_after_idx is None else int(stop_after_idx)
+        )
+        # Step-back: en modo paso a paso, permite retroceder el puntero un
+        # paso (para revisar / reejecutar). Lo activa step_back() y lo
+        # consume el loop tras despertar de _esperar_step().
+        self._step_back_flag: bool = False
 
     def abort(self) -> None:
         self._abort.set()
@@ -111,6 +125,17 @@ class Player:
 
     def advance_step(self) -> None:
         """En modo step-through, indica al loop que avance al siguiente paso."""
+        self._step_back_flag = False
+        self._step_continue.set()
+
+    def step_back(self) -> None:
+        """En modo step-through, retrocede el puntero un paso.
+
+        No deshace acciones ya ejecutadas (imposible en automatización de
+        UI), pero re-apunta al paso anterior para poder revisarlo o
+        reejecutarlo con el siguiente ▶. Despierta el wait igual que
+        advance_step(), marcando la intención de retroceder."""
+        self._step_back_flag = True
         self._step_continue.set()
 
     def step_index(self) -> int:
@@ -170,8 +195,12 @@ class Player:
             # soportar inserción/borrado en self.macro.pasos durante la
             # ejecución (caso del step-through: el usuario añade pasos
             # nuevos en mitad del flujo).
-            self._step_idx = 0
+            self._step_idx = min(self._start_idx, len(self.macro.pasos))
             while self._step_idx < len(self.macro.pasos):
+                # Corte por "ejecutar hasta aquí": si ya pasamos el último
+                # paso pedido, terminamos (éxito).
+                if self._stop_after_idx is not None and self._step_idx > self._stop_after_idx:
+                    break
                 idx = self._step_idx
                 paso = self.macro.pasos[idx]
                 if self._abort.is_set():
@@ -189,6 +218,13 @@ class Player:
                 self._esperar_step()
                 if self._abort.is_set():
                     break
+                # Step-back: el usuario pidió retroceder. Re-apuntamos al
+                # paso anterior (sin ejecutar el actual) y volvemos a
+                # esperar; la UI mostrará el paso previo resaltado.
+                if self._step_mode and self._step_back_flag:
+                    self._step_back_flag = False
+                    self._step_idx = max(self._start_idx, idx - 1)
+                    continue
                 # Control de flujo: IF_VENTANA decide cuántos pasos avanzar
                 # (ejecutar el bloque "then" o saltarlo). No es una acción
                 # de UI, así que se resuelve aquí y saltamos el resto.
@@ -257,8 +293,16 @@ class Player:
             except Exception as exc:
                 logger.debug("No se pudieron soltar los modificadores al finalizar: {}", exc)
             if self._watchdog:
+                # Cierre robusto: si el watchdog tarda en morir, el de la
+                # siguiente macro (en una cadena) se solaparía con éste y
+                # podría cerrar diálogos legítimos o duplicar incidencias.
                 self._watchdog.stop()
-                self._watchdog.join(timeout=1.0)
+                self._watchdog.join(timeout=3.0)
+                if self._watchdog.is_alive():
+                    logger.warning(
+                        "El watchdog de popups no terminó a tiempo; "
+                        "puede solaparse con la siguiente macro de la cadena"
+                    )
                 self._watchdog = None
 
     def _esperar_delay(self, paso: Step) -> None:

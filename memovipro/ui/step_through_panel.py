@@ -56,6 +56,8 @@ QPushButton#stop { background-color: #c0392b; border-color: #922b21; }
 QPushButton#stop:hover { background-color: #a93226; }
 QPushButton#record { background-color: #e67e22; border-color: #ba6411; }
 QPushButton#record:hover { background-color: #f39c12; }
+QPushButton#back { background-color: #2c3e50; border-color: #1a252f; }
+QPushButton#back:hover { background-color: #34495e; }
 """
 
 
@@ -125,7 +127,8 @@ class StepThroughPanel(QWidget):
         layout.addWidget(self.subtitle_label)
 
         self.action_label = QLabel(
-            "Pulsa <b>▶ Siguiente</b> (Espacio) para empezar."
+            "Pulsa <b>▶</b> o <b>→</b> para avanzar · <b>◀</b> o <b>←</b> "
+            "para retroceder."
         )
         self.action_label.setObjectName("action")
         self.action_label.setWordWrap(True)
@@ -135,6 +138,10 @@ class StepThroughPanel(QWidget):
         btns = QHBoxLayout()
         btns.setContentsMargins(0, 6, 0, 0)
         btns.setSpacing(6)
+        self.back_btn = QPushButton("◀ Atrás")
+        self.back_btn.setObjectName("back")
+        self.back_btn.clicked.connect(self._on_back)
+        btns.addWidget(self.back_btn)
         self.next_btn = QPushButton("▶ Siguiente")
         self.next_btn.setObjectName("next")
         self.next_btn.clicked.connect(self._on_next)
@@ -149,10 +156,15 @@ class StepThroughPanel(QWidget):
         btns.addWidget(self.stop_btn)
         layout.addLayout(btns)
 
-        # Atajos teclado: Espacio o F10 = Siguiente, Esc = Parar
-        for key in ("Space", "F10"):
+        # Atajos teclado:
+        #   Espacio / F10 / → (flecha derecha) = Siguiente
+        #   ← (flecha izquierda) = Atrás
+        #   Esc = Parar
+        for key in ("Space", "F10", "Right"):
             sc = QShortcut(QKeySequence(key), self)
             sc.activated.connect(self._on_next)
+        sc_back = QShortcut(QKeySequence("Left"), self)
+        sc_back.activated.connect(self._on_back)
         sc_esc = QShortcut(QKeySequence("Escape"), self)
         sc_esc.activated.connect(self._on_stop)
 
@@ -218,6 +230,15 @@ class StepThroughPanel(QWidget):
         if self._runner is None:
             return
         self._runner.advance_step()
+
+    def _on_back(self):
+        """Retrocede el puntero un paso (para revisar / reejecutar).
+
+        No deshace lo ya hecho en la aplicación, solo re-apunta al paso
+        anterior; el siguiente ▶ lo volverá a ejecutar."""
+        if self._runner is None:
+            return
+        self._runner.step_back()
 
     def _on_stop(self):
         if self._runner:

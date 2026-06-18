@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -26,6 +26,24 @@ from .record_dialog import RecordDialog
 
 
 COLS = ["#", "Tipo", "Selector", "Valor / Título", "Espera (s)", "Timeout (s)", "Opc.", "Descripción"]
+
+
+class _RangeRunThread(QThread):
+    """Ejecuta un sub-rango de la macro (ReplayRunner con start/stop)."""
+
+    finished_summary = pyqtSignal(object)  # ReplaySummary
+    error = pyqtSignal(str)
+
+    def __init__(self, runner):
+        super().__init__()
+        self.runner = runner
+
+    def run(self):
+        try:
+            summary = self.runner.run()
+            self.finished_summary.emit(summary)
+        except Exception as exc:  # pragma: no cover - depende de pywinauto
+            self.error.emit(str(exc))
 
 
 class StepEditor(QWidget):
@@ -77,6 +95,8 @@ class StepEditor(QWidget):
             ("Inspector", self._launch_inspector, None),
             ("⚡ Plantilla arranque", self._insertar_plantilla_arranque, "#8e44ad"),
             ("🐞 Paso a paso", self._launch_step_through, "#16a085"),
+            ("▶ Hasta aquí", self._run_hasta_aqui, "#2980b9"),
+            ("▶ Desde aquí", self._run_desde_aqui, "#2980b9"),
             ("Cargar YAML", self._load, None),
             ("Guardar YAML", self._save, None),
         ]
@@ -191,13 +211,35 @@ class StepEditor(QWidget):
         self.carpeta_descargas.setText(self.macro.salida.carpeta_descargas)
         self.patron_renombrado.setText(self.macro.salida.patron_renombrado)
 
+    # Tipos de paso cuyo "valor" se pide nada más crearlos (flujo más
+    # intuitivo: crear → escribir el valor en el acto).
+    _TIPOS_CON_VALOR = {
+        StepType.TYPE_TEXT, StepType.SEND_KEYS, StepType.SLEEP,
+        StepType.FOCUS_WINDOW, StepType.WAIT_FOR_WINDOW, StepType.CLOSE_WINDOW,
+        StepType.LAUNCH_PROGRAM, StepType.IF_VENTANA,
+    }
+
     def _add_step(self):
         tipos = [t.value for t in StepType]
         tipo, ok = QInputDialog.getItem(self, "Tipo de paso", "Selecciona:", tipos, 0, False)
         if not ok:
             return
-        self.macro.pasos.append(Step(tipo=StepType(tipo), descripcion=f"Nuevo {tipo}"))
+        nuevo = Step(tipo=StepType(tipo), descripcion=f"Nuevo {tipo}")
+        # Insertar JUSTO DESPUÉS de la fila seleccionada (más intuitivo que
+        # añadir siempre al final). Si no hay selección, va al final.
+        row = self.tabla.currentRow()
+        insert_at = (row + 1) if row >= 0 else len(self.macro.pasos)
+        self.macro.pasos.insert(insert_at, nuevo)
         self._refresh_table()
+        # Dejar seleccionado el paso recién creado y, si su tipo necesita un
+        # valor, abrir el editor en el acto para no tener que pulsar
+        # "Editar valor" por separado.
+        self.tabla.selectRow(insert_at)
+        target = self.tabla.item(insert_at, 0)
+        if target is not None:
+            self.tabla.scrollToItem(target)
+        if StepType(tipo) in self._TIPOS_CON_VALOR:
+            self._edit_value()
 
     def _edit_value(self):
         row = self.tabla.currentRow()
@@ -411,6 +453,123 @@ class StepEditor(QWidget):
             except Exception:
                 pass
         self._refresh_table()
+
+    # ---- ejecución por rango (hasta aquí / desde aquí) ----
+    def _run_hasta_aqui(self):
+        """Ejecuta la macro desde el principio hasta el paso seleccionado
+        (incluido) y se detiene. Útil para dejar la app en un punto
+        concreto antes de seguir grabando/probando."""
+        row = self.tabla.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Selecciona un paso",
+                                    "Pincha la fila hasta la que quieres ejecutar.")
+            return
+        self._run_range(start_idx=0, stop_after_idx=row,
+                        etiqueta=f"Hasta el paso {row + 1}")
+
+    def _run_desde_aqui(self):
+        """Ejecuta la macro desde el paso seleccionado hasta el final.
+        Útil para retomar sin repetir los pasos de arranque ya hechos."""
+        row = self.tabla.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Selecciona un paso",
+                                    "Pincha la fila desde la que quieres ejecutar.")
+            return
+        self._run_range(start_idx=row, stop_after_idx=None,
+                        etiqueta=f"Desde el paso {row + 1}")
+
+    def _run_range(self, start_idx: int, stop_after_idx, etiqueta: str):
+        self._sync_from_form()
+        if not self.macro.pasos:
+            QMessageBox.warning(self, "Macro vacía", "No hay pasos que ejecutar.")
+            return
+        if getattr(self, "_range_thread", None) is not None and self._range_thread.isRunning():
+            QMessageBox.information(self, "En ejecución", "Ya hay una ejecución en curso.")
+            return
+
+        from pathlib import Path
+        from core.replay_runner import ReplayRunner
+        from .control_window import ControlWindow
+
+        root_app = Path(__file__).resolve().parents[1]
+        data_dir = root_app / "data"
+        screenshots_dir = data_dir / "screenshots"
+        screenshots_dir.mkdir(parents=True, exist_ok=True)
+
+        self._range_runner = ReplayRunner(
+            macro=self.macro,
+            veces=1,
+            velocidad=1.0,
+            screenshots_dir=screenshots_dir,
+            data_dir=data_dir,
+            start_idx=start_idx,
+            stop_after_idx=stop_after_idx,
+        )
+        self._range_thread = _RangeRunThread(self._range_runner)
+        self._range_thread.finished_summary.connect(self._on_range_finished)
+        self._range_thread.error.connect(self._on_range_error)
+
+        # Panel flotante de control (pausa / parar) + minimizar MemoviPro.
+        self._range_control = ControlWindow(parent=None)
+        n = len(self.macro.pasos)
+        self._range_control.set_title(f"▶ {self.macro.nombre}", etiqueta)
+        ini = start_idx + 1
+        fin = (stop_after_idx + 1) if stop_after_idx is not None else n
+        self._range_control.set_progress(0, max(1, fin - ini + 1))
+        self._range_control.set_action(f"Pasos {ini}–{fin} de {n}")
+        self._range_control.pause_toggled.connect(self._on_range_pause)
+        self._range_control.stop_requested.connect(self._on_range_stop)
+        self._range_control.show_in_corner()
+
+        main_win = self.window()
+        self._range_main_visible = main_win is not None and main_win.isVisible()
+        if main_win is not None:
+            try:
+                main_win.showMinimized()
+            except Exception:
+                pass
+
+        self._range_thread.start()
+
+    def _on_range_pause(self, paused: bool):
+        runner = getattr(self, "_range_runner", None)
+        if runner is None:
+            return
+        runner.pause() if paused else runner.resume()
+
+    def _on_range_stop(self):
+        runner = getattr(self, "_range_runner", None)
+        if runner is not None:
+            runner.abort()
+
+    def _on_range_finished(self, summary):
+        self._cleanup_range_control()
+        QMessageBox.information(
+            self, "Ejecución terminada",
+            f"Rango ejecutado · OK={summary.ok} · KO={summary.ko}",
+        )
+
+    def _on_range_error(self, msg: str):
+        self._cleanup_range_control()
+        QMessageBox.warning(self, "Error en ejecución", msg)
+
+    def _cleanup_range_control(self):
+        ctrl = getattr(self, "_range_control", None)
+        if ctrl is not None:
+            try:
+                ctrl.close()
+                ctrl.deleteLater()
+            except Exception:
+                pass
+            self._range_control = None
+        main_win = self.window()
+        if main_win is not None and getattr(self, "_range_main_visible", True):
+            try:
+                main_win.showNormal()
+                main_win.raise_()
+                main_win.activateWindow()
+            except Exception:
+                pass
 
     def _insertar_plantilla_arranque(self):
         """Inserta al PRINCIPIO de la macro la secuencia de arranque limpio.

@@ -49,6 +49,7 @@ class PipelineRunner:
         on_step_start: Callable[[int, PipelineStep], None] | None = None,
         on_step_done: Callable[[int, PipelineStepResult], None] | None = None,
         on_log: Callable[[str], None] | None = None,
+        settle_entre_macros_s: float = 0.8,
     ):
         self.pipeline = pipeline
         self.macros_dir = Path(macros_dir)
@@ -57,6 +58,10 @@ class PipelineRunner:
         self.on_step_start = on_step_start
         self.on_step_done = on_step_done
         self.on_log = on_log
+        # Margen entre una macro y la siguiente: deja que el watchdog de la
+        # anterior termine del todo y que las ventanas se asienten antes de
+        # empezar a clicar en la siguiente (evita solapamientos en cadenas).
+        self.settle_entre_macros_s = max(0.0, float(settle_entre_macros_s))
         self._abort = threading.Event()
         self._current_replay: ReplayRunner | None = None
 
@@ -182,6 +187,13 @@ class PipelineRunner:
 
             if self.on_step_done:
                 self.on_step_done(idx, res)
+
+            # Asentar antes de la siguiente macro (no tras la última).
+            if idx < len(self.pipeline.pasos) and self.settle_entre_macros_s > 0:
+                self._log(f"  ⏲ asentando {self.settle_entre_macros_s:g}s antes de la siguiente macro")
+                fin = time.time() + self.settle_entre_macros_s
+                while time.time() < fin and not self._abort.is_set():
+                    time.sleep(min(0.1, max(0.0, fin - time.time())))
 
         self._log(
             f"=== Pipeline '{self.pipeline.nombre}' fin · "
