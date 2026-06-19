@@ -48,6 +48,46 @@ def _get_foreground_handle() -> int:
         return 0
 
 
+def _activar_agresivo(hwnd: int) -> bool:
+    """Fuerza una ventana al frente bypassando la protección de focus-stealing
+    de Windows.
+
+    El `SetForegroundWindow` "a secas" falla silenciosamente cuando el
+    proceso llamante no es el dueño de la ventana en primer plano (mecanismo
+    `LockSetForegroundWindow` que introdujo Windows para evitar que apps
+    "roben" el foco al usuario).
+
+    Truco estándar y bien documentado: simular una pulsación de Alt vacía
+    justo antes de la llamada. Durante esa fracción de segundo Windows
+    considera al proceso "interactivo" y permite el cambio. Es la receta
+    que usan AutoHotkey, UiPath y prácticamente cualquier automatizador
+    Windows serio.
+
+    Devuelve True si la ventana quedó efectivamente en primer plano.
+    """
+    if not hwnd:
+        return False
+    try:
+        import win32api  # type: ignore[import-not-found]
+        import win32con  # type: ignore[import-not-found]
+        import win32gui  # type: ignore[import-not-found]
+    except Exception:
+        return False
+    try:
+        # Si está minimizada, hay que restaurarla antes; SetForegroundWindow
+        # no funciona sobre ventanas iconificadas.
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        # Pulsación Alt vacía: engaña al LockSetForegroundWindow.
+        win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
+        win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+        win32gui.SetForegroundWindow(hwnd)
+        return int(win32gui.GetForegroundWindow()) == int(hwnd)
+    except Exception as exc:
+        logger.debug("Activación agresiva falló para hwnd={}: {}", hwnd, exc)
+        return False
+
+
 def listar_ventanas_visibles(excluir_propio: bool = True) -> list[VentanaInfo]:
     """Lista ventanas top-level visibles con título no vacío.
 
@@ -166,4 +206,20 @@ def asegurar_ventana(
         win.set_focus()
     except Exception as exc:
         logger.debug("No se pudo poner foco en la ventana '{}': {}", title_re, exc)
+    # Verificar que la ventana quedó efectivamente en primer plano. Si el
+    # set_focus() de pywinauto falló silenciosamente (focus-stealing
+    # prevention de Windows), aplicar la activación agresiva como fallback.
+    try:
+        handle = int(win.handle)
+    except Exception:
+        handle = 0
+    fg = _get_foreground_handle()
+    if handle and fg != handle:
+        if _activar_agresivo(handle):
+            logger.debug("Activación agresiva OK para '{}'", title_re)
+        else:
+            logger.warning(
+                "La ventana '{}' no quedó en primer plano (focus-stealing)",
+                title_re,
+            )
     return True, f"Encontrada y traída al frente: '{titulo_real}'"

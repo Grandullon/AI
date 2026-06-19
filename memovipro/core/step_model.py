@@ -29,6 +29,10 @@ class StepType(str, Enum):
     LAUNCH_PROGRAM = "launch_program"  # Ejecuta un .exe / shortcut / comando
     IF_VENTANA = "if_ventana"        # Condicional: si existe (o no) una ventana,
                                      # ejecuta el bloque siguiente o lo salta
+    CLICK_OCR_TEXT = "click_ocr_text"  # Clica sobre la palabra/frase indicada
+                                       # buscándola en pantalla con OCR. Robusto
+                                       # frente a cambios de UI (no depende de
+                                       # coordenadas ni de selectores).
 
 
 @dataclass

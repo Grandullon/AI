@@ -417,6 +417,9 @@ class Player:
             args = list(extra.get("args", []))
             self._launch_program(cmd, args)
             return
+        if tipo == StepType.CLICK_OCR_TEXT:
+            self._click_ocr_text(paso)
+            return
         raise ValueError(f"Tipo de paso no soportado: {tipo}")
 
     def _launch_program(self, cmd: str, args: list) -> None:
@@ -766,6 +769,96 @@ class Player:
             mouse.double_click(button=button, coords=(x, y))
         else:
             mouse.click(button=button, coords=(x, y))
+
+    def _click_ocr_text(self, paso: Step) -> None:
+        """CLICK_OCR_TEXT: captura pantalla, localiza con OCR el texto
+        indicado en `paso.valor` y clica en su centro.
+
+        `extra` opcional:
+          - button: "left" | "right" | "middle"
+          - double: bool
+          - min_confidence: int 0-100 (default 60)
+          - region: "ventana_objetivo" | "pantalla_completa" (default ventana)
+          - idioma: "spa+eng" | "eng" | ...
+        """
+        texto = (paso.valor or "").strip()
+        if not texto:
+            raise ValueError("click_ocr_text sin valor (texto a buscar)")
+        extra = paso.extra or {}
+        button = str(extra.get("button", "left"))
+        double = bool(extra.get("double", False))
+        min_conf = int(extra.get("min_confidence", 60))
+        region = str(extra.get("region", "ventana_objetivo"))
+        idioma = str(extra.get("idioma", "spa+eng"))
+
+        if self.dry_run:
+            logger.info('[dry-run] click_ocr_text "{}" (region={})', texto, region)
+            time.sleep(0.3)
+            return
+
+        from .ocr import disponible as ocr_disponible, localizar_texto_en_imagen
+        if not ocr_disponible():
+            raise RuntimeError(
+                "OCR no disponible (¿está instalado Tesseract en este equipo?)"
+            )
+
+        # 1. Capturar imagen sobre la que buscar. `offset_x/offset_y` debe
+        # quedar a (0,0) o al origen REAL de la imagen capturada — nunca a
+        # valores intermedios que pertenezcan a una captura que falló.
+        img_path: str | None = None
+        offset_x, offset_y = 0, 0
+
+        if region == "ventana_objetivo" and self.macro.ventana_principal:
+            try:
+                win = Desktop(backend="uia").window(
+                    title_re=f".*{self.macro.ventana_principal}.*"
+                )
+                if win.exists(timeout=1.0):
+                    from .screenshot import capturar_ventana_pywinauto
+                    shot = capturar_ventana_pywinauto(
+                        self.screenshots_dir, win, prefijo="ocr"
+                    )
+                    if shot:
+                        # ÉXITO: solo ahora fijamos el offset al origen de
+                        # la ventana. Si capturar_ventana_pywinauto hubiera
+                        # devuelto None, offset_x/offset_y siguen a (0,0)
+                        # y el fallback puede reasignarlos correctamente.
+                        rect = win.rectangle()
+                        offset_x, offset_y = int(rect.left), int(rect.top)
+                        img_path = str(shot)
+            except Exception as exc:
+                logger.debug("Captura de ventana falló: {}", exc)
+
+        if img_path is None:
+            # Fallback (o región explícita): pantalla completa. Devuelve el
+            # offset del virtual desktop, que en multi-monitor puede ser
+            # negativo si hay monitor secundario a la izquierda/arriba.
+            from .screenshot import capturar_pantalla_completa_con_offset
+            full = capturar_pantalla_completa_con_offset(
+                self.screenshots_dir, prefijo="ocr"
+            )
+            if full is None:
+                raise RuntimeError("No se pudo capturar la pantalla")
+            full_path, offset_x, offset_y = full
+            img_path = str(full_path)
+
+        # 2. Buscar el texto en la imagen
+        hit = localizar_texto_en_imagen(
+            img_path, texto, idioma=idioma, min_confidence=min_conf,
+        )
+        if hit is None:
+            raise RuntimeError(
+                f'No se encontró el texto "{texto}" en pantalla con confianza ≥ {min_conf}'
+            )
+
+        # 3. Clicar en coordenadas absolutas (centro del bbox + offset del crop)
+        abs_x = offset_x + hit.x
+        abs_y = offset_y + hit.y
+        logger.info(
+            'CLICK_OCR_TEXT "{}" → encontrado "{}" en ({},{}) conf={}',
+            texto, hit.texto, abs_x, abs_y, hit.confidence,
+        )
+        self._click_xy(abs_x, abs_y, button=button, double=double)
 
     def _type_text(self, paso: Step) -> None:
         if paso.selector and not paso.selector.is_empty():

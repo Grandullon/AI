@@ -34,6 +34,32 @@ def capturar_pantalla_completa(dest_dir: str | Path, prefijo: str = "screen") ->
     return out
 
 
+def capturar_pantalla_completa_con_offset(
+    dest_dir: str | Path, prefijo: str = "screen",
+) -> tuple[Path, int, int] | None:
+    """Captura todos los monitores y devuelve `(path, left, top)`.
+
+    El `(left, top)` es el origen del virtual desktop (`mss.monitors[0]`),
+    que en multi-monitor con un monitor secundario a la izquierda del
+    principal puede ser negativo. Esencial para mapear coordenadas de la
+    imagen capturada a coordenadas de pantalla absolutas.
+    """
+    if not _HAS_MSS:
+        return None
+    dest = Path(dest_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    out = dest / f"{prefijo}_{ts}.png"
+    try:
+        with mss.mss() as sct:
+            monitor = sct.monitors[0]
+            shot = sct.grab(monitor)
+            mss.tools.to_png(shot.rgb, shot.size, output=str(out))
+            return out, int(monitor["left"]), int(monitor["top"])
+    except Exception:
+        return None
+
+
 def capturar_region(
     dest_dir: str | Path,
     rect: tuple[int, int, int, int],

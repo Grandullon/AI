@@ -216,7 +216,7 @@ class StepEditor(QWidget):
     _TIPOS_CON_VALOR = {
         StepType.TYPE_TEXT, StepType.SEND_KEYS, StepType.SLEEP,
         StepType.FOCUS_WINDOW, StepType.WAIT_FOR_WINDOW, StepType.CLOSE_WINDOW,
-        StepType.LAUNCH_PROGRAM, StepType.IF_VENTANA,
+        StepType.LAUNCH_PROGRAM, StepType.IF_VENTANA, StepType.CLICK_OCR_TEXT,
     }
 
     def _add_step(self):
@@ -250,6 +250,11 @@ class StepEditor(QWidget):
         # IF_VENTANA tiene un editor propio (patrón + negar + nº pasos a saltar)
         if paso.tipo == StepType.IF_VENTANA:
             self._edit_if_ventana(paso)
+            return
+
+        # CLICK_OCR_TEXT: pide texto a buscar + confianza mínima + opciones
+        if paso.tipo == StepType.CLICK_OCR_TEXT:
+            self._edit_click_ocr_text(paso)
             return
 
         text, ok = QInputDialog.getText(self, "Editar valor", "Valor / título:", text=paso.valor or paso.titulo or "")
@@ -292,6 +297,53 @@ class StepEditor(QWidget):
         paso.extra = {"ventana": patron.strip(), "negar": negar, "saltar_si_no": saltar}
         cond_txt = "NO existe" if negar else "existe"
         paso.descripcion = f"SI {cond_txt} '{patron.strip()}' → ejecuta {saltar} pasos"
+        self._refresh_table()
+
+    def _edit_click_ocr_text(self, paso: Step):
+        """Editor de un paso CLICK_OCR_TEXT.
+
+        Pide el texto a buscar y, opcionalmente, la confianza mínima
+        (umbral OCR de 0-100, default 60) y si debe ser doble clic.
+        """
+        extra = paso.extra or {}
+        texto, ok = QInputDialog.getText(
+            self, "Clic sobre texto (OCR)",
+            "Texto a buscar en pantalla (case-insensitive, sin acentos):\n"
+            "Ej: 'Aceptar', 'Guardar como', 'INFORME'",
+            text=paso.valor or "",
+        )
+        if not ok:
+            return
+        texto = texto.strip()
+        if not texto:
+            QMessageBox.warning(self, "Texto vacío", "Hace falta un texto a buscar.")
+            return
+        conf, ok2 = QInputDialog.getInt(
+            self, "Confianza mínima OCR",
+            "Confianza mínima del OCR (0-100). 60 es seguro, 40 más permisivo:",
+            int(extra.get("min_confidence", 60)), 0, 100,
+        )
+        if not ok2:
+            return
+        items = ["Clic simple", "Doble clic"]
+        modo, ok3 = QInputDialog.getItem(
+            self, "Tipo de clic", "¿Cómo clicar?",
+            items, 1 if extra.get("double") else 0, False,
+        )
+        if not ok3:
+            return
+        double = (modo == items[1])
+        paso.valor = texto
+        nueva_extra = {"min_confidence": conf}
+        if double:
+            nueva_extra["double"] = True
+        # Mantén otras claves opcionales que el usuario haya configurado.
+        for k in ("button", "region", "idioma"):
+            if k in extra:
+                nueva_extra[k] = extra[k]
+        paso.extra = nueva_extra
+        verbo = "Doble clic" if double else "Clic"
+        paso.descripcion = f'{verbo} en texto "{texto}" (conf≥{conf})'
         self._refresh_table()
 
     def _edit_verificacion(self):
