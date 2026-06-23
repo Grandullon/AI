@@ -1,0 +1,21 @@
+# Credenciales y secretos — NO subir nunca
+.env
+credentials.json
+token.json
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env.local
+
+# Editores
+.vscode/
+.idea/
+.DS_Store
