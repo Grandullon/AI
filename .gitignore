@@ -1,0 +1,14 @@
+.env
+token.json
+credentials.json
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+logs/
+*.log
+.DS_Store
+.idea/
+.vscode/
