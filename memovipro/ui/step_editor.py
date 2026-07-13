@@ -263,6 +263,10 @@ class StepEditor(QWidget):
         if paso.tipo in (StepType.FOCUS_WINDOW, StepType.WAIT_FOR_WINDOW, StepType.CLOSE_WINDOW):
             paso.titulo = text
         else:
+            # Si el usuario cambia el valor de un paso grabado (raw), pasa a
+            # regir la semántica de placeholders: "{DNI}" debe sustituirse.
+            from core.step_model import limpiar_raw_si_editado
+            limpiar_raw_si_editado(paso, text)
             paso.valor = text
         self._refresh_table()
 

@@ -241,6 +241,21 @@ def render_placeholders(text: str, ctx: dict[str, str]) -> str:
     return _PLACEHOLDER_RE.sub(repl, text)
 
 
+def limpiar_raw_si_editado(paso: Step, nuevo_valor: str) -> None:
+    """Quita el flag raw de un paso grabado cuando el usuario edita su valor.
+
+    Los pasos grabados llevan `extra: {raw: true}` para que el texto
+    capturado se reproduzca literal (sin sustituir {DNI} ni {SECRET:...}).
+    Pero si el usuario cambia el valor a mano, asume la semántica de
+    placeholders documentada ("edita el valor y pon {DNI}") — mantener
+    raw teclearía el literal "{DNI}". Solo se limpia si el valor CAMBIA:
+    abrir el editor y aceptar sin tocar no debe reactivar placeholders
+    sobre un literal grabado.
+    """
+    if nuevo_valor != (paso.valor or "") and paso.extra:
+        paso.extra.pop("raw", None)
+
+
 def render_step(step: Step, ctx: dict[str, str]) -> Step:
     """Devuelve una copia del paso con los placeholders ya sustituidos.
 

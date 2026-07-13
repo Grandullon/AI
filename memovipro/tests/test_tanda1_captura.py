@@ -320,3 +320,45 @@ def test_b2_send_keys_raw_no_colisiona_con_columna_enter():
     paso = Step(tipo=StepType.SEND_KEYS, valor="{ENTER}", extra={"raw": True})
     out = render_step(paso, {"ENTER": "valor_de_la_celda"})
     assert out.valor == "{ENTER}"
+
+
+# ==================== Ronda 2: fixes de la revisión ====================
+
+def test_editar_valor_de_paso_grabado_quita_raw():
+    """Flujo documentado: grabar y luego editar el valor poniendo {DNI}.
+    Al cambiar el valor a mano, el flag raw debe desaparecer para que el
+    placeholder vuelva a sustituirse."""
+    from core.step_model import Step, StepType, limpiar_raw_si_editado, render_step
+
+    paso = Step(tipo=StepType.TYPE_TEXT, valor="12345678Z", extra={"raw": True})
+    limpiar_raw_si_editado(paso, "{DNI}")
+    paso.valor = "{DNI}"
+    assert "raw" not in paso.extra
+    out = render_step(paso, {"DNI": "87654321X"})
+    assert out.valor == "87654321X"
+
+
+def test_aceptar_sin_cambiar_valor_conserva_raw():
+    """Abrir el editor y aceptar sin tocar NO debe reactivar los
+    placeholders sobre un literal grabado."""
+    from core.step_model import Step, StepType, limpiar_raw_si_editado
+
+    paso = Step(tipo=StepType.TYPE_TEXT, valor="literal {DNI}", extra={"raw": True})
+    limpiar_raw_si_editado(paso, "literal {DNI}")  # mismo valor
+    assert paso.extra.get("raw") is True
+
+
+def test_zonas_excluidas_usan_coordenadas_fisicas():
+    """record_dialog debe publicar rects en píxeles FÍSICOS (GetWindowRect
+    en Windows / frameGeometry×devicePixelRatio como fallback), porque
+    pynput entrega coords físicas y Qt lógicas — con escalado 125/150%
+    las zonas quedarían desplazadas."""
+    # Inspección sobre el fichero (importar ui.record_dialog requiere
+    # PyQt6, no disponible en todos los entornos de test).
+    src = (ROOT / "ui" / "record_dialog.py").read_text(encoding="utf-8")
+    assert "GetWindowRect" in src
+    assert "devicePixelRatio" in src
+    assert "_rect_fisico" in src
+    # _actualizar_zonas_excluidas debe usar el rect físico, no frameGeometry directo
+    zona_fn = src.split("def _actualizar_zonas_excluidas")[1].split("def _tick_update")[0]
+    assert "_rect_fisico" in zona_fn

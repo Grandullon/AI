@@ -190,6 +190,41 @@ class RecordDialog(QDialog):
         # "Detener" o un arrastre del panel acaban grabados como pasos.
         self._actualizar_zonas_excluidas()
 
+    @staticmethod
+    def _rect_fisico(w) -> tuple[int, int, int, int] | None:
+        """Rectángulo de la ventana en píxeles FÍSICOS de pantalla.
+
+        pynput entrega coordenadas físicas, pero `frameGeometry()` de Qt
+        devuelve píxeles lógicos (escalados por DPI): con escalado de
+        Windows al 125/150% las zonas quedarían desplazadas y encogidas.
+        En Windows usamos GetWindowRect (físico, mismo espacio de
+        coordenadas que pynput); fuera de Windows, aproximamos con la
+        geometría lógica × devicePixelRatio.
+        """
+        try:
+            import ctypes
+            from ctypes import wintypes
+            rect = wintypes.RECT()
+            if ctypes.windll.user32.GetWindowRect(int(w.winId()), ctypes.byref(rect)):
+                return (
+                    int(rect.left), int(rect.top),
+                    int(rect.right - rect.left), int(rect.bottom - rect.top),
+                )
+        except Exception:
+            pass  # no-Windows o fallo de ctypes → fallback Qt
+        try:
+            g = w.frameGeometry()
+            try:
+                dpr = float(w.screen().devicePixelRatio()) if w.screen() else 1.0
+            except Exception:
+                dpr = 1.0
+            return (
+                int(g.left() * dpr), int(g.top() * dpr),
+                int(g.width() * dpr), int(g.height() * dpr),
+            )
+        except Exception:
+            return None
+
     def _actualizar_zonas_excluidas(self):
         """Publica en el recorder los rectángulos de las ventanas propias.
 
@@ -204,10 +239,11 @@ class RecordDialog(QDialog):
             try:
                 if not w.isVisible():
                     continue
-                g = w.frameGeometry()
-                zonas.append((g.left(), g.top(), g.width(), g.height()))
             except Exception:
                 continue
+            rect = self._rect_fisico(w)
+            if rect is not None:
+                zonas.append(rect)
         self._recorder.zonas_excluidas = zonas
 
     def _tick_update(self):
