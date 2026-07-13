@@ -50,6 +50,12 @@ class StepEditor(QWidget):
     def __init__(self, macros_dir: Path):
         super().__init__()
         self.macros_dir = macros_dir
+        # data/ vive junto a macros/ (ambas cuelgan de ROOT). Derivarlo de
+        # macros_dir en vez de Path(__file__) es imprescindible en el .exe
+        # onefile: __file__ apunta a la carpeta temporal _MEIPASS, que se
+        # borra al cerrar → las incidencias/capturas del paso a paso se
+        # perdían y no iban al data/ real de la app.
+        self.data_dir = self.macros_dir.parent / "data"
         self.macro: Macro = Macro(nombre="nueva_macro")
 
         layout = QVBoxLayout(self)
@@ -469,10 +475,8 @@ class StepEditor(QWidget):
         if not self.macro.pasos:
             QMessageBox.warning(self, "Macro vacía", "Añade o graba pasos antes de usar paso a paso.")
             return
-        # Resolver dirs de runtime relativos a la app
-        from pathlib import Path
-        root_app = Path(__file__).resolve().parents[1]
-        data_dir = root_app / "data"
+        # Dirs de runtime: data/ real de la app (no _MEIPASS en el .exe).
+        data_dir = self.data_dir
         screenshots_dir = data_dir / "screenshots"
         screenshots_dir.mkdir(parents=True, exist_ok=True)
 
@@ -547,8 +551,7 @@ class StepEditor(QWidget):
         from core.replay_runner import ReplayRunner
         from .control_window import ControlWindow
 
-        root_app = Path(__file__).resolve().parents[1]
-        data_dir = root_app / "data"
+        data_dir = self.data_dir
         screenshots_dir = data_dir / "screenshots"
         screenshots_dir.mkdir(parents=True, exist_ok=True)
 

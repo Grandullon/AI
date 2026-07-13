@@ -25,13 +25,16 @@ from core.runner import MacroRunner, RunSummary
 from core.step_model import Macro
 
 
-CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.json"
+def _cargar_smtp(config_path: Path) -> tuple[SmtpConfig | None, bool]:
+    """Devuelve (config, enviar_al_terminar) leyendo config.json.
 
-
-def _cargar_smtp() -> tuple[SmtpConfig | None, bool]:
-    """Devuelve (config, enviar_al_terminar) leyendo config.json."""
+    IMPORTANTE: `config_path` debe apuntar al config REAL junto al .exe,
+    no a `Path(__file__)`. En el build onefile de PyInstaller, `__file__`
+    resuelve a la carpeta temporal `_MEIPASS` (el config bundleado por
+    defecto), así que el config.json que el usuario edita se ignoraba
+    (el email SMTP nunca usaba su configuración)."""
     try:
-        with CONFIG_PATH.open(encoding="utf-8") as f:
+        with config_path.open(encoding="utf-8") as f:
             cfg = json.load(f)
     except Exception:
         return None, False
@@ -78,6 +81,11 @@ class RunPanel(QWidget):
         super().__init__()
         self.macros_dir = macros_dir
         self.data_dir = data_dir
+        # config.json vive junto al .exe / app.py, es decir en el padre de
+        # data/ (data_dir se calcula como ROOT/data en app.py, tanto en
+        # modo script como frozen). Así respetamos el config que el usuario
+        # edita, en vez del bundleado en _MEIPASS.
+        self.config_path = self.data_dir.parent / "config.json"
         self.on_finished = on_finished
         self._thread: _RunThread | None = None
         self._runner: MacroRunner | None = None
@@ -117,7 +125,7 @@ class RunPanel(QWidget):
         layout.addWidget(self.reintentar)
 
         self.notificar = QCheckBox("Enviar email resumen al terminar (usa config.json → smtp)")
-        smtp_cfg, enviar_default = _cargar_smtp()
+        smtp_cfg, enviar_default = _cargar_smtp(self.config_path)
         self.notificar.setChecked(enviar_default and bool(smtp_cfg and smtp_cfg.is_complete()))
         self.notificar.setEnabled(bool(smtp_cfg and smtp_cfg.is_complete()))
         if not (smtp_cfg and smtp_cfg.is_complete()):
@@ -180,7 +188,7 @@ class RunPanel(QWidget):
         self.log_view.clear()
         self.progress.setValue(0)
 
-        smtp_cfg, _ = _cargar_smtp()
+        smtp_cfg, _ = _cargar_smtp(self.config_path)
         smtp_para_usar = smtp_cfg if (self.notificar.isChecked() and smtp_cfg and smtp_cfg.is_complete()) else None
 
         self._runner = MacroRunner(

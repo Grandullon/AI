@@ -137,7 +137,48 @@ class MainWindow(QMainWindow):
         self.dashboard_panel.refresh()
         self.tabs.setCurrentWidget(self.incidents_view)
 
+    def _abortar_todo(self):
+        """Aborta cualquier ejecución en marcha en todos los paneles."""
+        for panel in (self.run_panel, self.replay_panel, self.pipeline_panel):
+            try:
+                panel.abort()
+            except Exception:
+                pass
+
     def _panic(self):
-        self.run_panel.abort()
-        self.replay_panel.abort()
+        # Incluye pipeline_panel: una cadena de macros en marcha (que puede
+        # durar mucho y controla el ratón) debe poder pararse con la tecla
+        # de emergencia igual que una ejecución por DNI o un replay.
+        self._abortar_todo()
         self.statusBar().showMessage("⏹  Ejecución abortada por el usuario (panic key)")
+
+    def closeEvent(self, event):
+        """Al cerrar la ventana, aborta y espera a los hilos de ejecución.
+
+        Sin esto, cerrar MemoviPro con una macro en marcha dejaba el hilo
+        worker automatizando el escritorio (clicando/tecleando) mientras
+        el bucle de Qt ya había terminado — comportamiento impredecible y
+        potencialmente peligroso sobre la app destino."""
+        hilos = []
+        for panel in (self.run_panel, self.replay_panel, self.pipeline_panel):
+            th = getattr(panel, "_thread", None)
+            if th is not None and th.isRunning():
+                hilos.append(th)
+        if hilos:
+            from PyQt6.QtWidgets import QMessageBox
+            resp = QMessageBox.question(
+                self, "Ejecución en marcha",
+                "Hay una ejecución en curso. ¿Detenerla y salir?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if resp != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+            self._abortar_todo()
+            for th in hilos:
+                try:
+                    th.wait(3000)  # dar 3s a que el worker vea el abort y salga
+                except Exception:
+                    pass
+        super().closeEvent(event)

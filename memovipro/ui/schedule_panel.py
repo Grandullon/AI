@@ -58,6 +58,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.scheduler import (
+    PREFIX,
     Frecuencia,
     _auto_detect_run_exe,
     construir_accion,
@@ -644,12 +645,26 @@ class SchedulePanel(QWidget):
 
     # ===== Acciones sobre tareas existentes =====
     def _nombre_seleccionado(self) -> str | None:
+        """Devuelve el nombre SIN el prefijo 'MemoviPro_'.
+
+        La tabla muestra el nombre completo tal cual lo devuelve el Task
+        Scheduler ('MemoviPro_rutina'), pero internamente (metadata,
+        formulario, y las funciones de core.scheduler que ya reañaden el
+        prefijo) trabajamos con el nombre "desnudo" ('rutina'). Sin este
+        strip, Editar cargaba metadata con la clave equivocada y siempre
+        daba "sin datos"; Eliminar dejaba el JSON de metadata huérfano.
+        """
         row = self.tabla.currentRow()
         if row < 0:
             QMessageBox.information(self, "Selecciona una tarea", "Pincha en una fila primero.")
             return None
         item = self.tabla.item(row, COL_NOMBRE)
-        return item.text() if item else None
+        if item is None:
+            return None
+        nombre = item.text()
+        if nombre.startswith(PREFIX):
+            nombre = nombre[len(PREFIX):]
+        return nombre
 
     def _ejecutar_ahora_seleccionada(self):
         nombre = self._nombre_seleccionado()
