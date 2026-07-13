@@ -477,14 +477,21 @@ class Player:
         """Scroll horizontal vía MOUSEEVENTF_HWHEEL (solo Windows).
 
         pywinauto no expone rueda horizontal. Movemos el cursor al punto y
-        emitimos el evento con ctypes. dx>0 = derecha. Cada notch = 120."""
+        emitimos el evento con ctypes. dx>0 = derecha. Cada notch = 120.
+
+        Si NO estamos en Windows (no hay `ctypes.windll`), es best-effort:
+        se loguea y no se rompe el paso. Pero si estamos en Windows y la
+        llamada real falla, se PROPAGA (simétrico con el scroll vertical:
+        un scroll fallido no debe contar como paso OK)."""
+        import ctypes
         try:
-            import ctypes
-            ctypes.windll.user32.SetCursorPos(int(x), int(y))
-            MOUSEEVENTF_HWHEEL = 0x01000
-            ctypes.windll.user32.mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, int(dx) * 120, 0)
-        except Exception as exc:
-            logger.warning("Scroll horizontal no soportado en esta plataforma: {}", exc)
+            windll = ctypes.windll  # AttributeError fuera de Windows
+        except AttributeError:
+            logger.debug("Scroll horizontal no soportado (no Windows)")
+            return
+        MOUSEEVENTF_HWHEEL = 0x01000
+        windll.user32.SetCursorPos(int(x), int(y))
+        windll.user32.mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, int(dx) * 120, 0)
 
     def _drag_xy(self, x1: int, y1: int, x2: int, y2: int, button: str = "left") -> None:
         if self.dry_run:
@@ -978,6 +985,17 @@ class Player:
             if not vk:
                 continue
             try:
+                if m == "win":
+                    # Tap de una tecla neutra (F13, sin mapeo) con Win AÚN
+                    # pulsado. Le indica a Windows que Win se usó como
+                    # modificador, así soltarlo no abre el menú Inicio. Sin
+                    # esto, un paso Win+X que falla ANTES de emitir input
+                    # dejaría "Win↓ … Win↑" en seco → se abre Inicio, roba
+                    # el foco y descarrila los pasos/DNIs siguientes.
+                    try:
+                        pwkeyboard.send_keys("{VK_F13}")
+                    except Exception:
+                        pass
                 pwkeyboard.send_keys("{" + vk + " up}")
                 logger.debug("Soltar modificador {}", m)
             except Exception as exc:

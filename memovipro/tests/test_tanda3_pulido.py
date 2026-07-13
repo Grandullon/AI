@@ -221,8 +221,96 @@ def test_checkpoint_invalidacion_no_reincorpora_por_fusion(tmp_path):
 
 # ==================== DPI ====================
 
-def test_dpi_set_awareness_no_rompe_fuera_de_windows():
+def test_dpi_set_awareness_falso_fuera_de_windows():
+    import sys as _sys
     from core.dpi import set_dpi_awareness
-    # En Linux no hay ctypes.windll → devuelve False sin lanzar.
     r = set_dpi_awareness()
-    assert r in (True, False)
+    if _sys.platform.startswith("win"):
+        assert r is True
+    else:
+        # Sin ctypes.windll → False, sin lanzar (no tautológico).
+        assert r is False
+
+
+def test_dpi_usa_per_monitor_v2_en_windows(monkeypatch):
+    """Simula Windows: debe llamar SetProcessDpiAwarenessContext(-4)."""
+    import ctypes
+    import core.dpi as dpi_mod
+
+    llamadas = {}
+
+    class _FakeUser32:
+        def SetProcessDpiAwarenessContext(self, ctx):
+            llamadas["ctx"] = ctx
+            return 1  # éxito
+
+    class _FakeWinDLL:
+        user32 = _FakeUser32()
+
+    monkeypatch.setattr(ctypes, "windll", _FakeWinDLL(), raising=False)
+    assert dpi_mod.set_dpi_awareness() is True
+    # ctypes.c_void_p(-4) = PER_MONITOR_AWARE_V2
+    assert llamadas["ctx"].value == ctypes.c_void_p(-4).value
+
+
+# ==================== B7 fix: tap neutro antes de soltar Win ====================
+
+def test_b7_soltar_win_emite_tap_neutro_antes(monkeypatch):
+    """Al soltar Win, se emite un tap neutro (F13) ANTES del VK_LWIN up,
+    para no abrir el menú Inicio si el paso Win+X falló sin emitir input."""
+    import core.player as pl
+
+    p = pl.Player.__new__(pl.Player)
+    p._modifiers_held = {"win"}
+
+    enviados = []
+    fake_kb = type("K", (), {"send_keys": staticmethod(lambda s: enviados.append(s))})()
+    monkeypatch.setattr(pl, "pwkeyboard", fake_kb)
+    monkeypatch.setattr(pl, "_HAS_PYWINAUTO", True)
+
+    pl.Player._adjust_modifiers(p, set())  # soltar todo (Win)
+
+    # El tap neutro {VK_F13} debe ir ANTES del {VK_LWIN up}
+    assert "{VK_F13}" in enviados
+    assert "{VK_LWIN up}" in enviados
+    assert enviados.index("{VK_F13}") < enviados.index("{VK_LWIN up}")
+
+
+def test_b7_soltar_ctrl_no_emite_tap_neutro(monkeypatch):
+    """Soltar Ctrl/Shift/Alt en vacío es inocuo: no debe emitir el tap
+    neutro (solo Win lo necesita)."""
+    import core.player as pl
+
+    p = pl.Player.__new__(pl.Player)
+    p._modifiers_held = {"ctrl"}
+    enviados = []
+    fake_kb = type("K", (), {"send_keys": staticmethod(lambda s: enviados.append(s))})()
+    monkeypatch.setattr(pl, "pwkeyboard", fake_kb)
+    monkeypatch.setattr(pl, "_HAS_PYWINAUTO", True)
+
+    pl.Player._adjust_modifiers(p, set())
+    assert "{VK_F13}" not in enviados
+    assert enviados == ["{VK_CONTROL up}"]
+
+
+def test_b4_scroll_horizontal_propaga_fallo_real(monkeypatch):
+    """En 'Windows' (windll presente), un fallo de mouse_event en el scroll
+    horizontal debe propagarse (no tragarse)."""
+    import ctypes
+    import core.player as pl
+
+    p = pl.Player.__new__(pl.Player)
+
+    class _FakeUser32:
+        def SetCursorPos(self, x, y): return 1
+        def mouse_event(self, *a): raise OSError("mouse_event KO")
+
+    class _FakeWinDLL:
+        user32 = _FakeUser32()
+
+    monkeypatch.setattr(ctypes, "windll", _FakeWinDLL(), raising=False)
+    try:
+        pl.Player._scroll_horizontal(p, 1, 2, 3)
+        assert False, "debió propagar el fallo real de mouse_event"
+    except OSError:
+        pass
