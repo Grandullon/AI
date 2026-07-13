@@ -93,7 +93,10 @@ class RecordDialog(QDialog):
         self._counter_steps = 0
         self._worker: Optional[_ResolveWorker] = None
         self._control: Optional[ControlWindow] = None
-        self._main_window_was_visible = True
+        # Nombre consistente con el que usan _iniciar_grabacion y
+        # _restaurar_ventanas (antes había un _main_window_was_visible
+        # muerto que confundía).
+        self._main_was_visible = True
 
         layout = QVBoxLayout(self)
         self.estado = QLabel(f"La grabación empezará en {COUNTDOWN_SECS}…")

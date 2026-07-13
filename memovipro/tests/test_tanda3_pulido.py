@@ -1,0 +1,228 @@
+"""Tests de la Tanda 3 (pulido) de la auditoría de captura.
+
+B7 — Win como modificador de clic (antes se perdía en el replay)
+B6 — suelo mínimo entre pasos a velocidad 0 (no fundir clics en doble clic)
+B4 — scroll horizontal separado del vertical + errores propagados
+B5 — drag con puntos intermedios
+A9 — timestamp del type_text = primer carácter (delay correcto)
+A14 — _flush_text sin el parámetro muerto force
+Checkpoint — fusión cross-process + reset preserva fingerprint
+DPI — set_dpi_awareness existe y es no-op seguro fuera de Windows
+"""
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+
+# ==================== B7: Win modifier ====================
+
+def test_b7_win_en_mod_vk_y_target_modifiers():
+    from core.player import Player
+    from core.step_model import Step, StepType
+
+    assert Player._MOD_VK.get("win") == "VK_LWIN"
+    paso = Step(tipo=StepType.CLICK_AT_XY, extra={"modifiers": "win"})
+    assert Player._target_modifiers(paso) == {"win"}
+    paso2 = Step(tipo=StepType.CLICK_AT_XY, extra={"modifiers": "ctrl+win"})
+    assert Player._target_modifiers(paso2) == {"ctrl", "win"}
+
+
+# ==================== B6: suelo mínimo a velocidad 0 ====================
+
+def test_b6_velocidad_cero_con_delay_duerme_suelo(monkeypatch):
+    import threading
+    from core.player import Player
+    from core.step_model import Step, StepType
+
+    p = Player.__new__(Player)
+    p.velocidad = 0.0
+    p._abort = threading.Event()
+
+    dormido = {"s": 0.0}
+    monkeypatch.setattr("core.player.time.sleep", lambda s: dormido.__setitem__("s", s))
+
+    paso = Step(tipo=StepType.CLICK_AT_XY, delay_before_s=1.5)
+    Player._esperar_delay(p, paso)
+    assert dormido["s"] == Player._SUELO_MIN_S  # suelo, no 1.5s ni 0
+
+
+def test_b6_velocidad_cero_sin_delay_no_duerme(monkeypatch):
+    import threading
+    from core.player import Player
+    from core.step_model import Step, StepType
+
+    p = Player.__new__(Player)
+    p.velocidad = 0.0
+    p._abort = threading.Event()
+    llamado = {"n": 0}
+    monkeypatch.setattr("core.player.time.sleep", lambda s: llamado.__setitem__("n", llamado["n"] + 1))
+
+    paso = Step(tipo=StepType.CLICK_AT_XY, delay_before_s=0.0)
+    Player._esperar_delay(p, paso)
+    assert llamado["n"] == 0  # sin delay grabado → 0 pausa
+
+
+# ==================== B4: scroll horizontal ====================
+
+def test_b4_scroll_separa_ejes(monkeypatch):
+    import threading
+    from core.player import Player
+    from core.step_model import Step
+
+    p = Player.__new__(Player)
+    p.dry_run = False
+    p._abort = threading.Event()
+
+    llamadas = {"vert": [], "horiz": []}
+    monkeypatch.setattr(p, "_scroll_horizontal",
+                        lambda x, y, dx: llamadas["horiz"].append((x, y, dx)))
+
+    import types
+    fake_mouse = types.SimpleNamespace(
+        scroll=lambda coords, wheel_dist: llamadas["vert"].append((coords, wheel_dist))
+    )
+    monkeypatch.setitem(sys.modules, "pywinauto", types.SimpleNamespace(mouse=fake_mouse))
+
+    # Solo vertical
+    Player._scroll_xy(p, 10, 20, 0, 3)
+    assert llamadas["vert"] == [((10, 20), 3)]
+    assert llamadas["horiz"] == []
+
+    # Solo horizontal → NO debe ir a la rueda vertical
+    Player._scroll_xy(p, 5, 6, -2, 0)
+    assert llamadas["vert"] == [((10, 20), 3)]  # sin cambios
+    assert llamadas["horiz"] == [(5, 6, -2)]
+
+
+def test_b4_scroll_propaga_error(monkeypatch):
+    import threading
+    import types
+    from core.player import Player
+
+    p = Player.__new__(Player)
+    p.dry_run = False
+    p._abort = threading.Event()
+
+    def scroll_falla(coords, wheel_dist):
+        raise RuntimeError("scroll KO")
+
+    fake_mouse = types.SimpleNamespace(scroll=scroll_falla)
+    monkeypatch.setitem(sys.modules, "pywinauto", types.SimpleNamespace(mouse=fake_mouse))
+
+    try:
+        Player._scroll_xy(p, 1, 1, 0, 1)
+        assert False, "debió propagar el error del scroll"
+    except RuntimeError:
+        pass
+
+
+# ==================== B5: drag interpolado ====================
+
+def test_b5_drag_usa_puntos_intermedios(monkeypatch):
+    import threading
+    import types
+    from core.player import Player
+
+    p = Player.__new__(Player)
+    p.dry_run = False
+    p._abort = threading.Event()
+
+    moves = []
+    fake_mouse = types.SimpleNamespace(
+        press=lambda button, coords: None,
+        move=lambda coords: moves.append(coords),
+        release=lambda button, coords: None,
+    )
+    monkeypatch.setitem(sys.modules, "pywinauto", types.SimpleNamespace(mouse=fake_mouse))
+    monkeypatch.setattr("core.player.time.sleep", lambda s: None)
+
+    Player._drag_xy(p, 0, 0, 100, 50, button="left")
+    # Debe haber MUCHOS moves intermedios (no 1 solo salto)
+    assert len(moves) >= 10
+    # El último move llega al destino
+    assert moves[-1] == (100, 50)
+    # Y hay puntos intermedios reales
+    assert any(0 < mx < 100 for (mx, my) in moves)
+
+
+# ==================== A9: timestamp primer carácter ====================
+
+def test_a9_type_text_usa_timestamp_del_primer_caracter():
+    from core.recorder import Recorder, _BufferTexto
+
+    rec = Recorder()
+    rec._grabando = True
+    rec._buf = _BufferTexto(texto="hola", primer_ts=100.0, ultimo_ts=105.0)
+    with rec._lock:
+        rec._flush_text()
+    assert len(rec.eventos_crudos) == 1
+    # El ts del evento es el del PRIMER carácter (100), no el último (105)
+    assert rec.eventos_crudos[0].timestamp == 100.0
+
+
+# ==================== A14: _flush_text sin force ====================
+
+def test_a14_flush_text_no_acepta_force():
+    import inspect
+    from core.recorder import Recorder
+    sig = inspect.signature(Recorder._flush_text)
+    assert "force" not in sig.parameters
+
+
+# ==================== Checkpoint: fusión + reset ====================
+
+def test_checkpoint_reset_preserva_fingerprint(tmp_path):
+    from core.dni_iterator import Checkpoint
+
+    cp = Checkpoint(macro="m", path_dir=tmp_path, fecha="20260101", macro_fingerprint="FP1")
+    cp.marcar_ok("A")
+    cp.reset()
+    assert cp._data.get("fingerprint") == "FP1"
+    # Recargar: como el fingerprint coincide, NO se invalida ni descarta.
+    cp2 = Checkpoint(macro="m", path_dir=tmp_path, fecha="20260101", macro_fingerprint="FP1")
+    assert cp2.invalidado is False
+    assert cp2.hechos() == set()  # reset lo vació
+
+
+def test_checkpoint_fusion_no_pierde_ok_de_otro_proceso(tmp_path):
+    """Simula dos procesos: cp_b marca un DNI que cp_a no conoce; cuando
+    cp_a guarda, debe FUSIONAR (no machacar) el OK de cp_b."""
+    from core.dni_iterator import Checkpoint
+
+    cp_a = Checkpoint(macro="m", path_dir=tmp_path, fecha="20260101", macro_fingerprint="FP")
+    cp_b = Checkpoint(macro="m", path_dir=tmp_path, fecha="20260101", macro_fingerprint="FP")
+
+    cp_a.marcar_ok("A")  # A en disco
+    # cp_b tiene su copia en memoria (sin A). Marca B → al guardar, fusiona.
+    cp_b.marcar_ok("B")
+
+    # cp_b debe tener A (de disco) y B (suyo)
+    assert cp_b.hechos() == {"A", "B"}
+    # Y en disco están los dos
+    cp_c = Checkpoint(macro="m", path_dir=tmp_path, fecha="20260101", macro_fingerprint="FP")
+    assert cp_c.hechos() == {"A", "B"}
+
+
+def test_checkpoint_invalidacion_no_reincorpora_por_fusion(tmp_path):
+    """Cambiar el fingerprint debe descartar los OK viejos pese a la
+    fusión (regresión que introdujo el fix de fusión)."""
+    from core.dni_iterator import Checkpoint
+
+    cp1 = Checkpoint(macro="m", path_dir=tmp_path, fecha="20260101", macro_fingerprint="OLD")
+    cp1.marcar_ok("X")
+    cp1.marcar_ok("Y")
+
+    cp2 = Checkpoint(macro="m", path_dir=tmp_path, fecha="20260101", macro_fingerprint="NEW")
+    assert cp2.invalidado is True
+    assert cp2.hechos() == set()  # NO reincorpora X, Y por la fusión
+
+
+# ==================== DPI ====================
+
+def test_dpi_set_awareness_no_rompe_fuera_de_windows():
+    from core.dpi import set_dpi_awareness
+    # En Linux no hay ctypes.windll → devuelve False sin lanzar.
+    r = set_dpi_awareness()
+    assert r in (True, False)

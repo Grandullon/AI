@@ -306,15 +306,26 @@ class Player:
                     )
                 self._watchdog = None
 
+    # Suelo mínimo entre pasos incluso a velocidad 0 (sin pausas), pero
+    # SOLO si hubo un hueco real al grabar. Evita que dos clics que el
+    # usuario hizo intencionadamente separados (p. ej. pulsar "+" dos
+    # veces con 1s entre medias) caigan dentro del umbral de doble clic
+    # del sistema y la app los interprete como un doble clic.
+    _SUELO_MIN_S = 0.12
+
     def _esperar_delay(self, paso: Step) -> None:
         """Espera `paso.delay_before_s / velocidad` antes del paso.
 
-        Si velocidad <= 0 se omiten las pausas. El sleep se hace en
-        tramos cortos para poder responder a abort sin esperas largas.
-        Cap de seguridad: nunca más de 1 hora entre dos pasos (por si
-        alguien edita el YAML a mano con un valor descomunal).
+        A velocidad <= 0 se omiten las pausas grabadas, pero se conserva
+        un suelo mínimo (_SUELO_MIN_S) cuando el paso tenía un delay real,
+        para no fundir clics consecutivos en un doble clic. El sleep se
+        hace en tramos cortos para responder a abort sin esperas largas.
         """
-        if paso.delay_before_s <= 0 or self.velocidad <= 0:
+        if paso.delay_before_s <= 0:
+            return
+        if self.velocidad <= 0:
+            # Sin pausas, pero suelo mínimo si el paso tenía separación real.
+            time.sleep(self._SUELO_MIN_S)
             return
         restante = paso.delay_before_s / self.velocidad
         # Sanity cap: 1 hora. El cap "razonable" para grabaciones está
@@ -447,13 +458,33 @@ class Player:
             time.sleep(0.15)
             return
         from pywinauto import mouse
-        # pywinauto.mouse.scroll: wheel_dist positivo = arriba, negativo = abajo.
-        # Usamos dy como cantidad principal (vertical es 99% del scroll real).
-        wheel = dy if dy != 0 else dx
+        # pywinauto.mouse.scroll solo emite rueda VERTICAL. El scroll
+        # horizontal (dx) se envía aparte con MOUSEEVENTF_HWHEEL. Antes se
+        # metía dx en la rueda vertical → desplazaba en el eje equivocado.
         try:
-            mouse.scroll(coords=(x, y), wheel_dist=wheel)
+            if dy != 0:
+                mouse.scroll(coords=(x, y), wheel_dist=dy)
+            if dx != 0:
+                self._scroll_horizontal(x, y, dx)
         except Exception as exc:
+            # Propagar: un scroll fallido no debe contar como paso OK (el
+            # control que debía revelar no apareció). _ejecutar_paso lo
+            # reintenta y, si persiste, se registra como incidencia.
             logger.warning("Fallo scroll en ({},{}): {}", x, y, exc)
+            raise
+
+    def _scroll_horizontal(self, x: int, y: int, dx: int) -> None:
+        """Scroll horizontal vía MOUSEEVENTF_HWHEEL (solo Windows).
+
+        pywinauto no expone rueda horizontal. Movemos el cursor al punto y
+        emitimos el evento con ctypes. dx>0 = derecha. Cada notch = 120."""
+        try:
+            import ctypes
+            ctypes.windll.user32.SetCursorPos(int(x), int(y))
+            MOUSEEVENTF_HWHEEL = 0x01000
+            ctypes.windll.user32.mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, int(dx) * 120, 0)
+        except Exception as exc:
+            logger.warning("Scroll horizontal no soportado en esta plataforma: {}", exc)
 
     def _drag_xy(self, x1: int, y1: int, x2: int, y2: int, button: str = "left") -> None:
         if self.dry_run:
@@ -464,11 +495,22 @@ class Player:
             time.sleep(0.3)
             return
         from pywinauto import mouse
+        # Interpolamos el recorrido en varios puntos intermedios. Un único
+        # salto de cursor (press → move directo → release) no arranca el
+        # drag en muchos controles (scrollbars, sliders, drag&drop con
+        # umbral DragDetect): necesitan ver varios WM_MOUSEMOVE tras el
+        # press para RECONOCER el arrastre. Sin esto se reproducía como
+        # click+release y el elemento no se movía.
+        N = 18
         try:
             mouse.press(button=button, coords=(x1, y1))
             time.sleep(0.05)
-            mouse.move(coords=(x2, y2))
-            time.sleep(0.05)
+            for i in range(1, N + 1):
+                xi = int(x1 + (x2 - x1) * i / N)
+                yi = int(y1 + (y2 - y1) * i / N)
+                mouse.move(coords=(xi, yi))
+                time.sleep(0.015)
+            time.sleep(0.03)
             mouse.release(button=button, coords=(x2, y2))
         except Exception as exc:
             logger.warning("Fallo drag de ({},{}) a ({},{}): {}", x1, y1, x2, y2, exc)
@@ -477,6 +519,7 @@ class Player:
                 mouse.release(button=button, coords=(x2, y2))
             except Exception:
                 pass
+            raise
 
     def _asegurar_ventana_objetivo(
         self,
@@ -900,7 +943,11 @@ class Player:
 
     # ---- Modificadores (Ctrl/Shift/Alt) mantenidos entre pasos ----
 
-    _MOD_VK = {"ctrl": "VK_CONTROL", "shift": "VK_SHIFT", "alt": "VK_MENU"}
+    _MOD_VK = {
+        "ctrl": "VK_CONTROL", "shift": "VK_SHIFT", "alt": "VK_MENU",
+        "win": "VK_LWIN",
+    }
+    _MODS_VALIDOS = ("ctrl", "shift", "alt", "win")
 
     @staticmethod
     def _target_modifiers(paso: Step) -> set[str]:
@@ -910,7 +957,7 @@ class Player:
         raw = str(paso.extra.get("modifiers", "")).lower()
         if not raw:
             return set()
-        return {m.strip() for m in raw.split("+") if m.strip() in ("ctrl", "shift", "alt")}
+        return {m.strip() for m in raw.split("+") if m.strip() in Player._MODS_VALIDOS}
 
     def _adjust_modifiers(self, target: set[str]) -> None:
         """Pulsa/suelta solo los modificadores que cambian.

@@ -61,6 +61,7 @@ DOUBLE_CLICK_RADIUS_PX = 8
 class _BufferTexto:
     texto: str = ""
     ultimo_ts: float = 0.0
+    primer_ts: float = 0.0  # timestamp del PRIMER carácter (para el delay del paso)
 
 
 @dataclass
@@ -296,7 +297,6 @@ class Recorder:
     `Recorder.construir_macro(events, resolver_selectores=True)`.
     """
 
-    FLUSH_TEXT_AFTER_S = 0.8
 
     def __init__(self):
         self.eventos_crudos: list[EventoCrudo] = []
@@ -365,7 +365,7 @@ class Recorder:
         self._mouse_listener = None
         self._kb_listener = None
         with self._lock:
-            self._flush_text(force=True)
+            self._flush_text()
         logger.info(
             "Recorder.stop · {} eventos crudos capturados (clicks={}, type_text={}, send_keys={}, scroll={}, drag={})",
             len(self.eventos_crudos),
@@ -440,7 +440,7 @@ class Recorder:
             self._press_pendiente = None
             if pendiente is None or pendiente["button"] != btn:
                 return  # release huérfano: ignorar
-            self._flush_text(force=True)
+            self._flush_text()
             dx_abs = abs(int(x) - pendiente["x"])
             dy_abs = abs(int(y) - pendiente["y"])
             if dx_abs > DRAG_DIST_THRESHOLD_PX or dy_abs > DRAG_DIST_THRESHOLD_PX:
@@ -515,7 +515,7 @@ class Recorder:
         if self._punto_excluido(int(x), int(y)):
             return
         with self._lock:
-            self._flush_text(force=True)
+            self._flush_text()
             mods = _modifiers_str(self._modifiers)
             direccion = "↑" if dy > 0 else ("↓" if dy < 0 else ("→" if dx > 0 else "←"))
             mods_label = mods.upper() + " " if mods else ""
@@ -587,10 +587,13 @@ class Recorder:
             if "altgr" in self._modifiers:
                 efectivos -= {"ctrl"}
             if char is not None and not efectivos:
+                ahora = time.time()
+                if not self._buf.texto:
+                    self._buf.primer_ts = ahora  # arranque de una ráfaga de texto
                 self._buf.texto += char
-                self._buf.ultimo_ts = time.time()
+                self._buf.ultimo_ts = ahora
                 return
-            self._flush_text(force=True)
+            self._flush_text()
             if char is not None:
                 # Escapar metacaracteres de send_keys en la base del atajo:
                 # Ctrl+'+' debe grabarse como "^{+}" — "^+" es un prefijo
@@ -626,13 +629,14 @@ class Recorder:
         with self._lock:
             self._modifiers.discard(mod)
 
-    def _flush_text(self, force: bool = False) -> None:
+    def _flush_text(self) -> None:
         if not self._buf.texto:
             return
-        if not force and (time.time() - self._buf.ultimo_ts) < self.FLUSH_TEXT_AFTER_S:
-            return
-        # Para texto agrupado, el timestamp es el del último carácter tecleado.
-        ts = self._buf.ultimo_ts or time.time()
+        # El timestamp del paso es el del PRIMER carácter: así el delay
+        # antes del type_text refleja la pausa REAL previa a empezar a
+        # teclear, no la pausa + toda la duración del tecleo (que hacía
+        # que el replay esperase de más y luego tecleara de golpe).
+        ts = self._buf.primer_ts or self._buf.ultimo_ts or time.time()
         self.eventos_crudos.append(EventoCrudo(
             tipo="type_text",
             valor=self._buf.texto,

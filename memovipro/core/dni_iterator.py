@@ -85,22 +85,61 @@ class Checkpoint:
         if self.fingerprint and cargado["fingerprint"] and cargado["fingerprint"] != self.fingerprint:
             self.invalidado = True
             self._data = {"ok": [], "ko": [], "fingerprint": self.fingerprint}
-            self._save()
+            # Escritura directa (NO _save): _save fusiona con el disco y
+            # reincorporaría los OK viejos que justo estamos invalidando.
+            self._escribir_directo()
         else:
             if self.fingerprint and not cargado["fingerprint"]:
                 cargado["fingerprint"] = self.fingerprint
             self._data = cargado
 
-    def _save(self) -> None:
+    def _escribir_directo(self) -> None:
+        """Escribe self._data tal cual (atómico, bajo lock), SIN fusionar.
+        Para reset()/invalidación, donde queremos machacar el disco."""
         from .file_lock import file_lock
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        # Lock entre procesos: la GUI y una tarea programada podrían
-        # escribir el mismo checkpoint a la vez.
         with file_lock(self.path):
             tmp = self.path.with_suffix(".tmp")
             with tmp.open("w", encoding="utf-8") as f:
                 json.dump(self._data, f, indent=2, ensure_ascii=False)
             tmp.replace(self.path)
+
+    def _save(self) -> None:
+        from .file_lock import file_lock
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Lock entre procesos: la GUI y una tarea programada podrían
+        # escribir el mismo checkpoint a la vez. Dentro del lock RE-LEEMOS
+        # el fichero y FUSIONAMOS con lo que tenemos en memoria antes de
+        # escribir: si no, cada proceso machacaría los OK/KO del otro
+        # (read-modify-write sin fusión) → DNIs reprocesados.
+        with file_lock(self.path):
+            self._fusionar_con_disco()
+            tmp = self.path.with_suffix(".tmp")
+            with tmp.open("w", encoding="utf-8") as f:
+                json.dump(self._data, f, indent=2, ensure_ascii=False)
+            tmp.replace(self.path)
+
+    def _fusionar_con_disco(self) -> None:
+        """Une los OK/KO en disco con los de memoria (debe llamarse ya bajo
+        el file_lock). Preserva el orden y evita duplicados."""
+        if not self.path.exists():
+            return
+        try:
+            with self.path.open(encoding="utf-8") as f:
+                disco = json.load(f)
+        except Exception:
+            return
+        for clave in ("ok", "ko"):
+            en_disco = disco.get(clave, []) or []
+            actuales = self._data.get(clave, []) or []
+            vistos = set(actuales)
+            # Los de disco que no tengamos ya, se anteponen (los generó el
+            # otro proceso antes que nuestra escritura).
+            nuevos = [d for d in en_disco if d not in vistos]
+            self._data[clave] = nuevos + actuales
+        # Un DNI marcado OK en cualquiera de los dos ya no es KO.
+        oks = set(self._data.get("ok", []))
+        self._data["ko"] = [d for d in self._data.get("ko", []) if d not in oks]
 
     def marcar_ok(self, dni: str) -> None:
         if dni not in self._data["ok"]:
@@ -125,5 +164,10 @@ class Checkpoint:
         return [r for r in todos if r["DNI"] not in hechos]
 
     def reset(self) -> None:
-        self._data = {"ok": [], "ko": []}
-        self._save()
+        # Preservar el fingerprint: sin él, el siguiente _load con
+        # fingerprint no detectaría cambios de la macro (el checkpoint
+        # quedaría sin la clave y se trataría como "sin fingerprint").
+        self._data = {"ok": [], "ko": [], "fingerprint": self.fingerprint or ""}
+        # reset() vacía a propósito: escritura directa, sin fusionar con el
+        # disco (que aún tiene los viejos OK/KO).
+        self._escribir_directo()

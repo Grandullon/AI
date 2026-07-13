@@ -14,6 +14,13 @@ else:
     ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+from core.dpi import set_dpi_awareness
+
+# Declarar DPI awareness ANTES de crear QApplication / cualquier ventana,
+# para que pynput (grabación) y pywinauto/Qt (reproducción) compartan el
+# mismo espacio de coordenadas físicas en pantallas con escalado ≠100%.
+set_dpi_awareness()
+
 from PyQt6.QtWidgets import QApplication
 
 from core.bootstrap import ensure_runtime_folders

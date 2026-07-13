@@ -49,10 +49,15 @@ _ocultar_consola_si_quiet()
 from loguru import logger
 
 from core.bootstrap import ensure_runtime_folders
+from core.dpi import set_dpi_awareness
 from core.log_config import setup_logging
 from core.notifier import SmtpConfig
 from core.runner import MacroRunner
 from core.step_model import Macro
+
+# DPI awareness explícito también en el CLI (tareas programadas): el
+# replay debe usar el mismo espacio de coordenadas físicas que se grabó.
+set_dpi_awareness()
 
 
 def _cargar_config() -> dict:
@@ -194,12 +199,18 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:
             logger.error("No se pudo cargar la macro: {}", exc)
             return 1
+        # Aplicar la config del watchdog igual que en modo --macro, para que
+        # un replay programado se comporte igual que desde la GUI (mismos
+        # popups "ignorables", mismo polling).
+        cfg = _cargar_config()
         runner = ReplayRunner(
             macro=macro,
             veces=args.veces,
             velocidad=args.velocidad,
             screenshots_dir=screenshots_dir,
             data_dir=data_dir,
+            polling_watchdog_ms=int(cfg.get("polling_watchdog_ms", 300)),
+            ignorar_popups=list(cfg.get("popup_titulos_ignorar", []) or []),
         )
         try:
             rsum = runner.run()

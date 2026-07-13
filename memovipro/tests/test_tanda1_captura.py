@@ -55,7 +55,7 @@ def _teclear(rec: Recorder, *teclas):
 
 def _flush(rec: Recorder):
     with rec._lock:
-        rec._flush_text(force=True)
+        rec._flush_text()
 
 
 # ==================== A1: espacios ====================
