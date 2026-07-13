@@ -43,6 +43,7 @@ except Exception:
         def exception(self, *a, **kw): pass
     logger = _NullLogger()
 
+from .keyboard_utils import escape_send_keys
 from .step_model import Macro, Selector, Step, StepType
 
 
@@ -97,24 +98,45 @@ def _button_corto(button) -> str:
 
 
 def _modifier_for(nombre: str) -> str | None:
-    """Devuelve 'ctrl' | 'shift' | 'alt' | 'win' si `nombre` es una tecla
-    modificadora.
+    """Devuelve 'ctrl' | 'shift' | 'alt' | 'altgr' | 'win' si `nombre` es
+    una tecla modificadora.
 
     pynput entrega ctrl_l, ctrl_r, shift_l, shift_r, alt_l, alt_r, alt_gr,
     y para la tecla Windows usa cmd / cmd_l / cmd_r (nombrado así por
     compatibilidad con macOS). Los unificamos a un nombre lógico por
     familia.
+
+    AltGr se mantiene SEPARADO de Alt: en teclado español AltGr produce
+    caracteres (@ # € [ ] { } \\) y debe ser transparente para el buffer
+    de texto — si lo tratáramos como Alt, teclear '@' se grabaría como
+    el atajo Alt+@ en vez de como texto.
     """
     n = nombre.lower()
     if n in ("ctrl", "ctrl_l", "ctrl_r"):
         return "ctrl"
     if n in ("shift", "shift_l", "shift_r"):
         return "shift"
-    if n in ("alt", "alt_l", "alt_r", "alt_gr"):
+    if n == "alt_gr":
+        return "altgr"
+    if n in ("alt", "alt_l", "alt_r"):
         return "alt"
     if n in ("cmd", "cmd_l", "cmd_r", "win", "win_l", "win_r"):
         return "win"
     return None
+
+
+def _normalizar_mods(mods: set[str]) -> set[str]:
+    """Normaliza 'altgr' para serializar/construir tokens.
+
+    En Windows AltGr ≡ Ctrl+Alt (el sistema envía un Ctrl sintético junto
+    a AltGr). Cuando hay que expresar AltGr como modificador de un atajo
+    o de un clic, lo convertimos a alt (+ctrl, que normalmente ya está
+    en el set por el evento sintético)."""
+    if "altgr" not in mods:
+        return set(mods)
+    out = set(mods) - {"altgr"}
+    out |= {"alt", "ctrl"}
+    return out
 
 
 def _modifiers_sendkeys_prefix(mods: set[str]) -> str:
@@ -148,6 +170,7 @@ def _construir_send_keys_token(mods: set[str], base: str) -> str:
         ({win}, "1") → "{VK_LWIN down}1{VK_LWIN up}"
         ({win, ctrl}, "d") → "{VK_CONTROL down}{VK_LWIN down}d{VK_LWIN up}{VK_CONTROL up}"
     """
+    mods = _normalizar_mods(mods)
     if not mods:
         return base
     if "win" not in mods:
@@ -171,6 +194,7 @@ def _construir_send_keys_token(mods: set[str], base: str) -> str:
 
 def _friendly_combo(mods: set[str], base: str) -> str:
     """Descripción legible: 'Win+D', 'Ctrl+Shift+S', 'Win+↑'."""
+    mods = _normalizar_mods(mods)
     pretty_arrows = {"{UP}": "↑", "{DOWN}": "↓", "{LEFT}": "←", "{RIGHT}": "→"}
     pretty_base = pretty_arrows.get(base, base.strip("{}").upper() if base.startswith("{") else base.upper())
     partes = []
@@ -188,6 +212,7 @@ def _friendly_combo(mods: set[str], base: str) -> str:
 
 def _modifiers_str(mods: set[str]) -> str:
     """Serializa el set a 'ctrl+shift' (orden estable)."""
+    mods = _normalizar_mods(mods)
     orden = ["ctrl", "alt", "shift", "win"]
     presentes = [m for m in orden if m in mods]
     return "+".join(presentes)
@@ -286,6 +311,12 @@ class Recorder:
         self._modifiers: set[str] = set()
         # Press de ratón pendiente de release (para detectar drag).
         self._press_pendiente: dict | None = None
+        # Rectángulos de pantalla (left, top, w, h) cuyos eventos de ratón
+        # NO deben grabarse: las propias ventanas de MemoviPro (el diálogo
+        # de grabación y el panel flotante). Sin esto, el clic en "Detener"
+        # o un arrastre del panel acaban como pasos de la macro. La UI
+        # (RecordDialog) actualiza esta lista periódicamente.
+        self.zonas_excluidas: list[tuple[int, int, int, int]] = []
 
     # Propiedad usada por la GUI para el contador en vivo.
     @property
@@ -346,8 +377,26 @@ class Recorder:
         )
         return list(self.eventos_crudos)
 
+    def _punto_excluido(self, x: int, y: int) -> bool:
+        """¿El punto cae dentro de una ventana propia de MemoviPro?"""
+        for (left, top, w, h) in list(self.zonas_excluidas):
+            if left <= x <= left + w and top <= y <= top + h:
+                return True
+        return False
+
     # ---- Callbacks ----
+    # Todos los callbacks van blindados con try/except: pynput DETIENE el
+    # listener si un callback lanza una excepción, y el resultado sería
+    # una grabación que sigue "en marcha" en la UI pero ya no captura
+    # nada (síntoma real reportado). Mejor perder un evento y loguearlo
+    # que perder el resto de la grabación en silencio.
     def _on_click(self, x, y, button, pressed):
+        try:
+            self._on_click_impl(x, y, button, pressed)
+        except Exception:
+            logger.exception("Error en el callback de clic; evento descartado")
+
+    def _on_click_impl(self, x, y, button, pressed):
         """Maneja press y release del ratón.
 
         En el press guardamos la posición y el botón en `_press_pendiente`.
@@ -355,6 +404,14 @@ class Recorder:
         o un drag (release significativamente lejos del press).
         """
         if not self._grabando:
+            return
+        if self._punto_excluido(int(x), int(y)):
+            # Clic sobre el propio MemoviPro (botón Detener, arrastre del
+            # panel flotante...): no es parte de la macro. Si había un
+            # press pendiente (arrastre que termina sobre el panel), se
+            # descarta también.
+            with self._lock:
+                self._press_pendiente = None
             return
         btn = _button_corto(button)
         if pressed:
@@ -446,8 +503,16 @@ class Recorder:
         ))
 
     def _on_scroll(self, x, y, dx, dy):
+        try:
+            self._on_scroll_impl(x, y, dx, dy)
+        except Exception:
+            logger.exception("Error en el callback de scroll; evento descartado")
+
+    def _on_scroll_impl(self, x, y, dx, dy):
         """Captura la rueda del ratón. Cada notch es un evento independiente."""
         if not self._grabando:
+            return
+        if self._punto_excluido(int(x), int(y)):
             return
         with self._lock:
             self._flush_text(force=True)
@@ -476,36 +541,65 @@ class Recorder:
         return " ".join(partes)
 
     def _on_press(self, key):
+        try:
+            self._on_press_impl(key)
+        except Exception:
+            logger.exception("Error en el callback de tecla; evento descartado")
+
+    def _on_press_impl(self, key):
         if not self._grabando:
             return
         nombre = str(key).replace("Key.", "").replace("'", "")
         if nombre in TECLAS_IGNORADAS:
             return
         # Tecla modificadora: solo actualizar estado, sin emitir evento.
+        # OJO: aquí NO se hace flush del buffer de texto. El flush ocurre
+        # más abajo solo si la siguiente tecla resulta ser un atajo. Hacer
+        # flush en cada press de modificador fragmentaba el texto: cada
+        # Shift de una mayúscula (y el Ctrl sintético que Windows envía
+        # con AltGr) partía "Hola Mundo" en varios pasos type_text.
         mod = _modifier_for(nombre)
         if mod is not None:
             with self._lock:
                 self._modifiers.add(mod)
-                # Si había buffer de texto, flush antes (un Ctrl que llega
-                # interrumpe el flujo de tecleo natural).
-                self._flush_text(force=True)
             return
         with self._lock:
             char = self._tecla_a_char(key)
-            # Si hay Ctrl/Alt/Win activos, es un atajo (Ctrl+A, Alt+F, Win+D...)
-            # — no texto normal. Shift solo se considera "texto en mayúscula"
-            # y se deja al buffer.
-            non_shift_mods = self._modifiers - {"shift"}
-            if char is not None and not non_shift_mods:
+            # La barra espaciadora llega como Key.space (sin .char). La
+            # tratamos como el carácter ' ' para que "hola mundo" sea UN
+            # solo type_text — como paso send_keys suelto el espacio se
+            # perdía al reproducir (send_keys sin with_spaces los descarta).
+            if char is None and nombre == "space":
+                char = " "
+            # Ctrl+letra llega en Windows como carácter de control
+            # (\x01..\x1a), no como la letra. Recuperamos la letra real
+            # para grabar "^a" y no el token irreproducible "^\x01".
+            if char is not None and ord(char) < 32:
+                if "ctrl" in self._modifiers and 1 <= ord(char) <= 26:
+                    char = chr(ord(char) + 96)
+                else:
+                    char = None  # control char sin mapeo → probar como tecla especial
+            # Modificadores "efectivos" para decidir texto vs atajo:
+            # - shift es transparente (solo cambia mayúsculas/símbolos).
+            # - AltGr es transparente (produce caracteres: @ # € [ ] { })
+            #   igual que el Ctrl sintético que Windows envía junto a AltGr.
+            efectivos = self._modifiers - {"shift", "altgr"}
+            if "altgr" in self._modifiers:
+                efectivos -= {"ctrl"}
+            if char is not None and not efectivos:
                 self._buf.texto += char
                 self._buf.ultimo_ts = time.time()
                 return
             self._flush_text(force=True)
             if char is not None:
-                base = char
+                # Escapar metacaracteres de send_keys en la base del atajo:
+                # Ctrl+'+' debe grabarse como "^{+}" — "^+" es un prefijo
+                # Ctrl+Shift sin tecla y revienta al reproducir.
+                base = "{SPACE}" if char == " " else escape_send_keys(char)
             else:
                 base = self._tecla_a_send_keys(key)
                 if not base:
+                    logger.debug("Tecla sin mapeo send_keys descartada: {}", nombre)
                     return
             token = _construir_send_keys_token(self._modifiers, base)
             descripcion = "Tecla " + _friendly_combo(self._modifiers, base)
@@ -517,6 +611,12 @@ class Recorder:
             ))
 
     def _on_release(self, key):
+        try:
+            self._on_release_impl(key)
+        except Exception:
+            logger.exception("Error en el callback de release de tecla")
+
+    def _on_release_impl(self, key):
         if not self._grabando:
             return
         nombre = str(key).replace("Key.", "").replace("'", "")
@@ -656,18 +756,27 @@ class Recorder:
                 if on_progress is not None:
                     on_progress(n_click, total_clicks)
             elif evt.tipo == "type_text":
+                # raw=True: el texto grabado es LITERAL. Sin este flag, un
+                # texto tecleado que contenga {DNI}, {MM} o {SECRET:x} sería
+                # sustituido por el motor de placeholders al reproducir
+                # (incluyendo teclear secretos reales del almacén).
                 pasos.append(Step(
                     tipo=StepType.TYPE_TEXT,
                     valor=evt.valor,
                     descripcion=evt.descripcion,
                     delay_before_s=delay,
+                    extra={"raw": True},
                 ))
             elif evt.tipo == "send_keys":
+                # raw=True también aquí: los tokens {ENTER}/{TAB}/{F1}...
+                # colisionan con el regex de placeholders si el Excel tiene
+                # una columna llamada "enter", "tab", etc.
                 pasos.append(Step(
                     tipo=StepType.SEND_KEYS,
                     valor=evt.valor,
                     descripcion=evt.descripcion,
                     delay_before_s=delay,
+                    extra={"raw": True},
                 ))
             elif evt.tipo == "scroll":
                 extra: dict = {"x": evt.x, "y": evt.y, "dx": evt.dx, "dy": evt.dy}

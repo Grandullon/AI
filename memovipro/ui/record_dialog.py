@@ -185,9 +185,35 @@ class RecordDialog(QDialog):
             except Exception:
                 pass
 
+        # Que el recorder ignore los clics sobre nuestras propias ventanas
+        # (este diálogo y el panel flotante): sin esto, el clic en
+        # "Detener" o un arrastre del panel acaban grabados como pasos.
+        self._actualizar_zonas_excluidas()
+
+    def _actualizar_zonas_excluidas(self):
+        """Publica en el recorder los rectángulos de las ventanas propias.
+
+        Se llama al iniciar y en cada tick del timer (300 ms), así las
+        zonas siguen al panel flotante si el usuario lo arrastra."""
+        if self._recorder is None:
+            return
+        zonas: list[tuple[int, int, int, int]] = []
+        for w in (self, self._control):
+            if w is None:
+                continue
+            try:
+                if not w.isVisible():
+                    continue
+                g = w.frameGeometry()
+                zonas.append((g.left(), g.top(), g.width(), g.height()))
+            except Exception:
+                continue
+        self._recorder.zonas_excluidas = zonas
+
     def _tick_update(self):
         if self._recorder is None:
             return
+        self._actualizar_zonas_excluidas()
         n = len(self._recorder.pasos)
         if n != self._counter_steps:
             self._counter_steps = n

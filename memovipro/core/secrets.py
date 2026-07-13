@@ -22,6 +22,8 @@ try:
     _HAS_KEYRING = True
 except Exception:
     _HAS_KEYRING = False
+    keyring = None  # placeholder para tests (monkeypatch) y para que el
+    #                 nombre exista aunque el paquete no esté instalado
 
 SERVICE_NAME = "MemoviPro"
 

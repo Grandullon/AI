@@ -27,7 +27,9 @@ def test_modifier_for_normaliza_variantes():
     assert _modifier_for("ctrl_r") == "ctrl"
     assert _modifier_for("shift") == "shift"
     assert _modifier_for("alt") == "alt"
-    assert _modifier_for("alt_gr") == "alt"
+    # AltGr es un modificador SEPARADO de Alt: produce caracteres (@ # €)
+    # en teclado español y debe ser transparente para el buffer de texto.
+    assert _modifier_for("alt_gr") == "altgr"
     assert _modifier_for("a") is None
     assert _modifier_for("enter") is None
 

@@ -242,7 +242,14 @@ def render_placeholders(text: str, ctx: dict[str, str]) -> str:
 
 
 def render_step(step: Step, ctx: dict[str, str]) -> Step:
-    """Devuelve una copia del paso con los placeholders ya sustituidos."""
+    """Devuelve una copia del paso con los placeholders ya sustituidos.
+
+    Los pasos con `extra: {raw: true}` (los que produce el grabador para
+    texto/teclas capturados literalmente) NO pasan su `valor` por el motor
+    de placeholders: lo tecleado debe reproducirse tal cual, sin sustituir
+    {DNI}/{MM}/... ni resolver {SECRET:...} (que teclearía un secreto real).
+    """
+    raw = bool((step.extra or {}).get("raw"))
     new_selector = None
     if step.selector:
         new_selector = Selector(
@@ -255,7 +262,7 @@ def render_step(step: Step, ctx: dict[str, str]) -> Step:
     return Step(
         tipo=step.tipo,
         selector=new_selector,
-        valor=render_placeholders(step.valor, ctx) if step.valor else None,
+        valor=step.valor if raw else (render_placeholders(step.valor, ctx) if step.valor else None),
         titulo=render_placeholders(step.titulo, ctx) if step.titulo else None,
         timeout_s=step.timeout_s,
         reintentos=step.reintentos,

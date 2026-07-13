@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -720,7 +721,11 @@ class Player:
         if not _HAS_PYWINAUTO:
             return False
         try:
-            win = Desktop(backend="uia").window(title_re=f".*{title}.*")
+            # El título viene capturado LITERAL por el recorder: hay que
+            # escaparlo. "Doc1 [Modo compatibilidad]" sin escapar es una
+            # clase de caracteres regex (clicaría en la ventana equivocada)
+            # y "Notepad++" directamente lanza re.error.
+            win = Desktop(backend="uia").window(title_re=f".*{re.escape(title)}.*")
             if not win.exists(timeout=1.0):
                 return False
             r = win.rectangle()
