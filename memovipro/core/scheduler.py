@@ -24,6 +24,20 @@ from loguru import logger
 PREFIX = "MemoviPro_"
 
 
+def sin_prefijo(nombre: str) -> str:
+    """Devuelve el nombre 'desnudo' (sin el prefijo MemoviPro_).
+
+    Fuente única de verdad para el strip: la usan tanto la UI
+    (schedule_panel._nombre_seleccionado) como los tests, para que una
+    regresión en la lógica se detecte de verdad."""
+    return nombre[len(PREFIX):] if nombre.startswith(PREFIX) else nombre
+
+
+def con_prefijo(nombre: str) -> str:
+    """Devuelve el nombre con el prefijo MemoviPro_ (idempotente)."""
+    return nombre if nombre.startswith(PREFIX) else f"{PREFIX}{nombre}"
+
+
 @dataclass
 class TareaProgramada:
     nombre: str

@@ -58,7 +58,6 @@ from PyQt6.QtWidgets import (
 )
 
 from core.scheduler import (
-    PREFIX,
     Frecuencia,
     _auto_detect_run_exe,
     construir_accion,
@@ -67,6 +66,7 @@ from core.scheduler import (
     eliminar_tarea,
     habilitar_tarea,
     listar_tareas,
+    sin_prefijo,
     validar_args,
 )
 from core.scheduler_metadata import TaskMetadata
@@ -661,10 +661,7 @@ class SchedulePanel(QWidget):
         item = self.tabla.item(row, COL_NOMBRE)
         if item is None:
             return None
-        nombre = item.text()
-        if nombre.startswith(PREFIX):
-            nombre = nombre[len(PREFIX):]
-        return nombre
+        return sin_prefijo(item.text())
 
     def _ejecutar_ahora_seleccionada(self):
         nombre = self._nombre_seleccionado()

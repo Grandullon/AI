@@ -152,18 +152,36 @@ class MainWindow(QMainWindow):
         self._abortar_todo()
         self.statusBar().showMessage("⏹  Ejecución abortada por el usuario (panic key)")
 
+    def _hilos_en_marcha(self):
+        """Lista de QThreads de ejecución actualmente corriendo."""
+        hilos = []
+        for panel in (self.run_panel, self.replay_panel, self.pipeline_panel):
+            th = getattr(panel, "_thread", None)
+            if th is not None and th.isRunning():
+                hilos.append(th)
+        return hilos
+
+    def _detener_hilos(self, hilos) -> None:
+        """Aborta todo y espera (con tope) a que los workers terminen."""
+        self._abortar_todo()
+        for th in hilos:
+            try:
+                th.wait(3000)  # dar 3s a que el worker vea el abort y salga
+            except Exception:
+                pass
+
     def closeEvent(self, event):
         """Al cerrar la ventana, aborta y espera a los hilos de ejecución.
 
         Sin esto, cerrar MemoviPro con una macro en marcha dejaba el hilo
         worker automatizando el escritorio (clicando/tecleando) mientras
         el bucle de Qt ya había terminado — comportamiento impredecible y
-        potencialmente peligroso sobre la app destino."""
-        hilos = []
-        for panel in (self.run_panel, self.replay_panel, self.pipeline_panel):
-            th = getattr(panel, "_thread", None)
-            if th is not None and th.isRunning():
-                hilos.append(th)
+        potencialmente peligroso sobre la app destino.
+
+        La decisión (qué hilos hay, abortarlos, esperar) vive en
+        `_hilos_en_marcha`/`_detener_hilos` para poder testearla sin
+        instanciar QMainWindow (super() aquí lo impediría)."""
+        hilos = self._hilos_en_marcha()
         if hilos:
             from PyQt6.QtWidgets import QMessageBox
             resp = QMessageBox.question(
@@ -175,10 +193,5 @@ class MainWindow(QMainWindow):
             if resp != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
-            self._abortar_todo()
-            for th in hilos:
-                try:
-                    th.wait(3000)  # dar 3s a que el worker vea el abort y salga
-                except Exception:
-                    pass
+            self._detener_hilos(hilos)
         super().closeEvent(event)

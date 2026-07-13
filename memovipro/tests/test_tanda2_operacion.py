@@ -77,6 +77,36 @@ def test_c2_varias_incidencias_bloqueadas_se_acumulan_en_csv(tmp_path, monkeypat
     assert len(lineas) == 4
 
 
+def test_c2_guardar_atomico_limpia_tmp_si_replace_falla(tmp_path, monkeypatch):
+    """Si el replace final falla (Excel bloqueado en Windows), el .tmp NO
+    debe quedar huérfano en data/."""
+    from core.excel_logger import ExcelLogger, Incidencia
+
+    log = ExcelLogger(tmp_path / "inc.xlsx")
+    tmp_file = (tmp_path / "inc.xlsx").with_suffix(".xlsx.tmp")
+
+    # Simular: save escribe el .tmp correctamente, pero replace falla.
+    import pathlib
+    real_replace = pathlib.Path.replace
+
+    def replace_falla(self, target):
+        raise PermissionError("destino bloqueado por Excel")
+
+    monkeypatch.setattr(pathlib.Path, "replace", replace_falla)
+
+    class _WB:
+        def save(self, path):
+            pathlib.Path(path).write_bytes(b"contenido tmp")
+
+    try:
+        log._guardar_atomico(_WB())
+        assert False, "debía re-lanzar PermissionError"
+    except PermissionError:
+        pass
+    # El .tmp debe haberse limpiado pese al fallo.
+    assert not tmp_file.exists(), "el .tmp quedó huérfano"
+
+
 def test_c2_reintenta_y_acaba_escribiendo(tmp_path, monkeypatch):
     """Si el Excel se libera tras 2 intentos, la fila acaba en el .xlsx
     (no en el CSV)."""
@@ -111,18 +141,27 @@ def test_c1_prefix_importable_desde_scheduler():
     assert PREFIX == "MemoviPro_"
 
 
-def test_c1_nombre_seleccionado_quita_prefijo():
-    """La lógica de strip del prefijo (aislada de Qt): dado el texto de la
-    tabla 'MemoviPro_rutina', el nombre interno debe ser 'rutina'."""
-    from core.scheduler import PREFIX
+def test_c1_sin_prefijo_es_la_funcion_real_que_usa_el_panel():
+    """`sin_prefijo` es la fuente única de verdad: la usa tanto
+    schedule_panel._nombre_seleccionado como este test. Una regresión en
+    el strip se cazaría de verdad."""
+    from core.scheduler import sin_prefijo, con_prefijo
 
-    def strip_prefix(texto: str) -> str:
-        return texto[len(PREFIX):] if texto.startswith(PREFIX) else texto
+    assert sin_prefijo("MemoviPro_rutina") == "rutina"
+    assert sin_prefijo("rutina") == "rutina"  # idempotente
+    assert con_prefijo("rutina") == "MemoviPro_rutina"
+    assert con_prefijo("MemoviPro_rutina") == "MemoviPro_rutina"  # idempotente
+    # round-trip
+    assert sin_prefijo(con_prefijo("x")) == "x"
 
-    assert strip_prefix("MemoviPro_rutina") == "rutina"
-    assert strip_prefix("rutina") == "rutina"  # idempotente
-    # Y las funciones del scheduler reañaden el prefijo de forma tolerante:
-    # crear/ejecutar/eliminar aceptan tanto 'rutina' como 'MemoviPro_rutina'.
+
+def test_c1_panel_usa_sin_prefijo_real():
+    """El panel debe delegar en la función compartida, no reimplementar el
+    strip inline (evita que se desincronicen)."""
+    src = (ROOT / "ui" / "schedule_panel.py").read_text(encoding="utf-8")
+    assert "sin_prefijo" in src
+    fn = src.split("def _nombre_seleccionado")[1].split("def ")[0]
+    assert "sin_prefijo(item.text())" in fn
 
 
 def test_c1_metadata_roundtrip_con_nombre_desnudo(tmp_path):
@@ -158,23 +197,92 @@ def test_c3_step_editor_data_dir_desde_macros_dir():
     assert "root_app = Path(__file__).resolve().parents[1]" not in src
 
 
-# ==================== C4/C5: pánico y cierre ====================
+# ==================== C4/C5: pánico y cierre (conductual sin Qt) ====================
+# MainWindow no se puede instanciar sin PyQt6 (no disponible en el entorno
+# de test), pero _abortar_todo es lógica pura sobre los 3 paneles: la
+# ejercitamos con un objeto ligero que expone los mismos atributos.
 
-def test_c4_panic_incluye_pipeline_panel():
+class _FakePanel:
+    def __init__(self, corriendo=False):
+        self._aborted = False
+        self._thread = _FakeThread(corriendo)
+
+    def abort(self):
+        self._aborted = True
+
+
+class _FakeThread:
+    def __init__(self, corriendo):
+        self._corriendo = corriendo
+        self.waited = False
+
+    def isRunning(self):
+        return self._corriendo
+
+    def wait(self, ms):
+        self.waited = True
+        self._corriendo = False
+
+
+def _bind_metodos(run_ok, replay_ok, pipe_ok):
+    """Reusa los métodos REALES de MainWindow (los que NO llaman super())
+    sobre un objeto ligero, sin instanciar QMainWindow. Requiere PyQt6
+    (importa la clase) → skip donde no esté; corre de verdad en Windows.
+
+    Nota: NO bindeamos closeEvent porque su `super().closeEvent()` exige
+    que el objeto sea instancia de QMainWindow. Toda la lógica abortable
+    vive en `_hilos_en_marcha`/`_detener_hilos`, que sí son testeables."""
+    import pytest
+    pytest.importorskip("PyQt6.QtWidgets")
+    from ui.main_window import MainWindow
+
+    obj = type("_M", (), {})()
+    obj.run_panel = _FakePanel(run_ok)
+    obj.replay_panel = _FakePanel(replay_ok)
+    obj.pipeline_panel = _FakePanel(pipe_ok)
+    for m in ("_abortar_todo", "_hilos_en_marcha", "_detener_hilos"):
+        setattr(obj, m, getattr(MainWindow, m).__get__(obj))
+    return obj
+
+
+def test_c4_abortar_todo_aborta_los_tres_paneles():
+    obj = _bind_metodos(False, False, False)
+    obj._abortar_todo()
+    assert obj.run_panel._aborted
+    assert obj.replay_panel._aborted
+    assert obj.pipeline_panel._aborted  # antes NO se abortaba la cadena
+
+
+def test_c4_panic_delega_en_abortar_todo():
     src = (ROOT / "ui" / "main_window.py").read_text(encoding="utf-8")
-    abort_fn = src.split("def _abortar_todo")[1].split("def ")[0]
-    assert "pipeline_panel" in abort_fn
-    assert "run_panel" in abort_fn
-    assert "replay_panel" in abort_fn
-    # _panic delega en _abortar_todo
     panic_fn = src.split("def _panic")[1].split("def ")[0]
     assert "_abortar_todo" in panic_fn
 
 
-def test_c5_closeevent_aborta_hilos():
+def test_c5_hilos_en_marcha_detecta_solo_los_corriendo():
+    obj = _bind_metodos(run_ok=True, replay_ok=False, pipe_ok=True)
+    hilos = obj._hilos_en_marcha()
+    assert len(hilos) == 2  # run y pipeline corriendo, replay no
+
+
+def test_c5_detener_hilos_aborta_y_espera():
+    """La parte que importa de closeEvent: aborta todo y espera a los
+    hilos en marcha (antes cerrar dejaba el worker automatizando)."""
+    obj = _bind_metodos(run_ok=True, replay_ok=False, pipe_ok=False)
+    hilos = obj._hilos_en_marcha()
+    obj._detener_hilos(hilos)
+    assert obj.run_panel._aborted
+    assert obj.replay_panel._aborted
+    assert obj.pipeline_panel._aborted
+    assert obj.run_panel._thread.waited      # esperó al hilo que corría
+
+
+def test_c5_closeevent_estructura():
+    """closeEvent debe: mirar hilos, preguntar, respetar el 'No'
+    (event.ignore) y delegar en _detener_hilos + super()."""
     src = (ROOT / "ui" / "main_window.py").read_text(encoding="utf-8")
-    assert "def closeEvent" in src
-    close_fn = src.split("def closeEvent")[1].split("def ")[0]
-    assert "_abortar_todo" in close_fn
-    assert "isRunning" in close_fn
-    assert ".wait(" in close_fn  # espera a que el worker termine
+    close_fn = src.split("def closeEvent")[1].split("\n    def ")[0]
+    assert "_hilos_en_marcha" in close_fn
+    assert "event.ignore()" in close_fn
+    assert "_detener_hilos" in close_fn
+    assert "super().closeEvent" in close_fn

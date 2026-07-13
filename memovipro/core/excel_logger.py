@@ -163,10 +163,21 @@ class ExcelLogger:
     def _guardar_atomico(self, wb) -> None:
         """Guarda a un .tmp y lo reemplaza. Evita dejar el .xlsx corrupto
         si el proceso muere a mitad del save (todos los append posteriores
-        fallarían para siempre porque load_workbook no puede abrirlo)."""
+        fallarían para siempre porque load_workbook no puede abrirlo).
+
+        Si el `replace` falla (destino bloqueado por Excel), limpiamos el
+        .tmp para no dejar residuos huérfanos en data/ y re-lanzamos para
+        que el bucle de reintentos de `append` lo gestione."""
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        wb.save(tmp)
-        tmp.replace(self.path)
+        try:
+            wb.save(tmp)
+            tmp.replace(self.path)
+        except Exception:
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            raise
 
     def _volcar_a_csv_emergencia(self, inc: Incidencia, err: Exception | None) -> None:
         """Escribe la fila en incidencias_YYYYMMDD.pendientes.csv cuando el
