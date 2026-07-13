@@ -87,7 +87,6 @@ def test_c2_guardar_atomico_limpia_tmp_si_replace_falla(tmp_path, monkeypatch):
 
     # Simular: save escribe el .tmp correctamente, pero replace falla.
     import pathlib
-    real_replace = pathlib.Path.replace
 
     def replace_falla(self, target):
         raise PermissionError("destino bloqueado por Excel")
