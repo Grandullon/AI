@@ -1408,17 +1408,25 @@ function buildReport(){
   } else {
     csvTbody.innerHTML=csvSelRows.map((r,idx)=>{
       // Cuantía ya ES el total del mes — diferencia = cuantía - percibió
-      const importe = r.cuantia;
-      const difInicial = importe - r.percibio;
+      // Todos los campos precargados son editables; la diferencia se recalcula sola
+      const difInicial = r.cuantia - r.percibio;
       const dc = difInicial > 0.005 ? 'color:var(--green-dark)' : difInicial < -0.005 ? 'color:var(--accent)' : 'color:var(--gray-400)';
       const difTxt = Math.abs(difInicial) < 0.005 ? '0,00 €' : (difInicial > 0 ? '+' : '') + fmt2(difInicial) + ' €';
-      return `<tr data-idx="${idx}" data-importe="${importe}">
-        <td class="strong">${r.mes}</td>
+      return `<tr data-idx="${idx}">
+        <td class="strong" style="padding:2px 5px">
+          <input type="text" class="pt-input" value="${r.mes}"
+            style="width:90px;font-size:8.5pt;font-weight:600" placeholder="Ene-24">
+        </td>
         <td class="mono center" style="padding:2px 4px">
           <input type="text" class="pt-input" value="${r.trienios}"
             style="width:52px;font-size:8.5pt;text-align:center" placeholder="Ej: 6B">
         </td>
-        <td class="mono right">${fmt2(r.cuantia)} €</td>
+        <td class="mono right" style="padding:2px 5px;white-space:nowrap">
+          <input type="text" class="csv-cuantia pt-input right-input"
+            value="${fmt2(r.cuantia)}"
+            style="width:70px;font-size:8.5pt"
+            oninput="recalcCSVRow(this)" placeholder="0,00"> €
+        </td>
         <td class="mono right" style="padding:2px 5px;white-space:nowrap">
           <input type="text" class="csv-percibio pt-input right-input"
             value="${fmt2(r.percibio)}"
@@ -1514,8 +1522,10 @@ function parseEuro(s) {
 
 function recalcCSVRow(inp) {
   const tr = inp.closest('tr');
-  const importe = parseFloat(tr.dataset.importe) || 0;
-  const percibio = parseEuro(inp.value);
+  const cuantiaInp = tr.querySelector('.csv-cuantia');
+  const percibioInp = tr.querySelector('.csv-percibio');
+  const importe = cuantiaInp ? parseEuro(cuantiaInp.value) : 0;
+  const percibio = percibioInp ? parseEuro(percibioInp.value) : 0;
   const dif = importe - percibio;
   const difCell = tr.querySelector('.csv-dif');
   if (difCell) {
@@ -1538,11 +1548,10 @@ function recalcCSVTotals() {
 
   let totalImporte = 0, totalPercibio = 0;
   rows.forEach(tr => {
-    const importe  = parseFloat(tr.dataset.importe) || 0;
+    const cuantiaInp  = tr.querySelector('.csv-cuantia');
     const percibioInp = tr.querySelector('.csv-percibio');
-    const percibio = percibioInp ? parseEuro(percibioInp.value) : 0;
-    totalImporte  += importe;
-    totalPercibio += percibio;
+    totalImporte  += cuantiaInp  ? parseEuro(cuantiaInp.value)  : 0;
+    totalPercibio += percibioInp ? parseEuro(percibioInp.value) : 0;
   });
   const totalDif = totalImporte - totalPercibio;
 
