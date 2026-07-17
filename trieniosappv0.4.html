@@ -1,0 +1,1720 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gestor de Trienios — HUVN</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;500;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap');
+
+/* ── VARIABLES ─────────────────────────────────── */
+:root {
+  --green:      #2e7d4f;
+  --green-mid:  #3a9463;
+  --green-light:#e8f5ee;
+  --green-pale: #f2faf5;
+  --green-dark: #1a4f32;
+  --teal:       #1a6b7a;
+  --blue-pale:  #eaf4f7;
+  --white:      #ffffff;
+  --gray-50:    #f8fafb;
+  --gray-100:   #eef1f3;
+  --gray-200:   #dde3e7;
+  --gray-400:   #9baab4;
+  --gray-600:   #5a6b76;
+  --gray-800:   #2c3e47;
+  --black:      #1a252b;
+  --accent:     #d4521a;
+  --radius:     4px;
+  --shadow:     0 1px 3px rgba(0,0,0,.10), 0 4px 12px rgba(0,0,0,.06);
+  --shadow-lg:  0 4px 16px rgba(0,0,0,.12), 0 12px 32px rgba(0,0,0,.08);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+
+body {
+  font-family: 'Source Sans 3', sans-serif;
+  background: var(--gray-50);
+  color: var(--gray-800);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+/* ── VIEWS ─────────────────────────────────────── */
+.view { display: none; height: 100vh; flex-direction: column; }
+.view.active { display: flex; }
+
+/* ══════════════════════════════════════════════════
+   VIEW 1 — SELECCIÓN
+══════════════════════════════════════════════════ */
+
+/* Header */
+.app-header {
+  background: var(--green-dark);
+  padding: 0 24px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,.2);
+}
+.app-logo {
+  display: flex; align-items: center; gap: 10px;
+}
+.app-logo-icon {
+  width: 32px; height: 32px;
+  background: var(--green-mid);
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+}
+.app-logo-text {
+  font-weight: 700; font-size: 15px;
+  color: #fff; letter-spacing: 0.2px;
+}
+.app-logo-text span { color: rgba(255,255,255,.5); font-weight: 300; }
+.app-header-center {
+  flex: 1; text-align: center;
+}
+.app-header-center h1 {
+  font-size: 12px; font-weight: 400;
+  color: rgba(255,255,255,.6); letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.header-badge {
+  font-size: 11px; padding: 3px 10px;
+  border-radius: 12px; font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.badge-sel {
+  background: rgba(255,255,255,.12);
+  color: rgba(255,255,255,.8);
+  border: 1px solid rgba(255,255,255,.2);
+}
+
+/* Sub-header toolbar */
+.toolbar {
+  background: var(--white);
+  border-bottom: 2px solid var(--gray-200);
+  padding: 8px 24px;
+  display: flex; align-items: center; gap: 12px;
+  flex-shrink: 0;
+  box-shadow: 0 1px 4px rgba(0,0,0,.06);
+}
+.toolbar-section { display: flex; align-items: center; gap: 8px; }
+.toolbar-divider { width: 1px; height: 24px; background: var(--gray-200); }
+.sel-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; padding: 3px 10px;
+  border-radius: 12px; font-weight: 500;
+}
+.sel-pill-green { background: var(--green-light); color: var(--green); border: 1px solid #b5dfc7; }
+.sel-pill-teal  { background: var(--blue-pale);   color: var(--teal);  border: 1px solid #b0d8e0; }
+.sel-pill .num  { font-weight: 700; font-size: 13px; }
+
+/* Panels grid */
+.panels-grid {
+  flex: 1; display: grid;
+  grid-template-columns: 1fr 1fr;
+  overflow: hidden;
+  gap: 0;
+}
+
+/* Panel */
+.panel {
+  display: flex; flex-direction: column;
+  overflow: hidden; background: var(--white);
+  border-right: 1px solid var(--gray-200);
+}
+.panel:last-child { border-right: none; }
+
+.panel-head {
+  padding: 10px 16px;
+  background: linear-gradient(135deg, var(--green-dark) 0%, var(--green) 100%);
+  display: flex; align-items: center; gap: 10px;
+  flex-shrink: 0;
+}
+.panel-head.teal {
+  background: linear-gradient(135deg, #0d4a56 0%, var(--teal) 100%);
+}
+.panel-head-title {
+  font-size: 11.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1px;
+  color: rgba(255,255,255,.9);
+}
+.panel-head-sub {
+  font-size: 11px; color: rgba(255,255,255,.55);
+  margin-left: auto;
+}
+.btn-selall {
+  font-family: 'Source Sans 3', sans-serif;
+  font-size: 11px; font-weight: 700;
+  padding: 3px 10px; border-radius: 3px;
+  border: 1.5px solid rgba(255,255,255,.4);
+  background: rgba(255,255,255,.12);
+  color: rgba(255,255,255,.9);
+  cursor: pointer; transition: all .15s;
+  white-space: nowrap; margin-left: 8px;
+}
+.btn-selall:hover { background: rgba(255,255,255,.25); border-color: rgba(255,255,255,.7); }
+
+/* Upload */
+.upload-area {
+  margin: 12px 16px 8px;
+  flex-shrink: 0;
+}
+.upload-zone {
+  border: 2px dashed var(--gray-200);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex; align-items: center; gap: 12px;
+  cursor: pointer; transition: all .15s;
+  background: var(--gray-50);
+}
+.upload-zone:hover { border-color: var(--green-mid); background: var(--green-pale); }
+.upload-zone.loaded { border-color: var(--green-mid); border-style: solid; background: var(--green-pale); }
+.upload-zone.loaded-teal { border-color: var(--teal); background: var(--blue-pale); }
+.upload-icon-wrap {
+  width: 36px; height: 36px; border-radius: 8px;
+  background: var(--green-light); display: flex;
+  align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+}
+.upload-icon-wrap.teal { background: var(--blue-pale); }
+.upload-text-main { font-size: 12.5px; font-weight: 600; color: var(--gray-800); }
+.upload-text-sub  { font-size: 11px; color: var(--gray-400); font-family: 'Source Serif 4', serif; }
+.upload-filename  { font-size: 12px; font-weight: 700; color: var(--green); }
+.upload-filename.teal { color: var(--teal); }
+input[type=file] { display: none; }
+
+/* Worker badge */
+.worker-strip {
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  background: var(--green-pale);
+  border-left: 3px solid var(--green);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  display: none; flex-shrink: 0;
+}
+.worker-strip.visible { display: block; }
+.worker-strip-name { font-weight: 700; font-size: 13px; color: var(--green-dark); }
+.worker-strip-dni  { font-size: 11px; color: var(--gray-600); font-family: monospace; }
+
+/* Spinner */
+.progress {
+  display: none; align-items: center; gap: 8px;
+  padding: 0 16px 8px; font-size: 12px; color: var(--gray-400);
+  flex-shrink: 0;
+}
+.progress.visible { display: flex; }
+.spinner {
+  width: 14px; height: 14px;
+  border: 2px solid var(--gray-200);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Table scroll wrap */
+.table-wrap { flex: 1; overflow: auto; }
+
+/* Tables */
+.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.data-table thead th {
+  position: sticky; top: 0;
+  background: var(--gray-100);
+  color: var(--gray-600);
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.8px;
+  padding: 7px 10px; text-align: left;
+  border-bottom: 2px solid var(--gray-200);
+  white-space: nowrap;
+}
+.data-table tbody tr {
+  border-bottom: 1px solid var(--gray-100);
+  cursor: pointer; transition: background .1s;
+}
+.data-table tbody tr:hover { background: var(--gray-50); }
+.data-table tbody tr.row-sel-green {
+  background: var(--green-pale) !important;
+  border-left: 3px solid var(--green);
+}
+.data-table tbody tr.row-sel-teal {
+  background: var(--blue-pale) !important;
+  border-left: 3px solid var(--teal);
+}
+.data-table td {
+  padding: 6px 10px; color: var(--gray-600);
+}
+.data-table td.strong { font-weight: 600; color: var(--gray-800); }
+.data-table td.mono { font-family: 'Courier New', monospace; font-size: 11.5px; }
+.chk {
+  width: 16px; height: 16px; border-radius: 3px;
+  border: 1.5px solid var(--gray-200);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; color: transparent; transition: all .12s;
+}
+.row-sel-green .chk { background: var(--green); border-color: var(--green); color: #fff; }
+.row-sel-teal  .chk { background: var(--teal);  border-color: var(--teal);  color: #fff; }
+
+/* Tags */
+.tag {
+  display: inline-block; font-size: 10px; font-weight: 700;
+  padding: 1px 5px; border-radius: 3px;
+  font-family: monospace; letter-spacing: 0.3px;
+}
+.tag-c1 { background: #dbeafe; color: #1d4ed8; }
+.tag-c2 { background: var(--green-light); color: var(--green-dark); }
+.tag-b  { background: #fef9c3; color: #854d0e; }
+.tag-a  { background: #fce7f3; color: #9d174d; }
+.tag-fij { background: #dbeafe; color: #1e40af; }
+.tag-tem { background: #fef3c7; color: #92400e; }
+
+/* Empty state */
+.empty {
+  height: 120px; display: flex; align-items: center;
+  justify-content: center; color: var(--gray-400);
+  font-size: 12px; gap: 6px;
+}
+
+/* CTA button */
+.btn {
+  font-family: 'Source Sans 3', sans-serif;
+  font-size: 12px; font-weight: 700;
+  padding: 7px 18px; border-radius: var(--radius);
+  border: none; cursor: pointer; transition: all .15s;
+  letter-spacing: 0.3px; white-space: nowrap;
+}
+.btn-primary {
+  background: var(--green); color: #fff;
+}
+.btn-primary:hover { background: var(--green-dark); }
+.btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+.btn-outline {
+  background: transparent; color: var(--gray-600);
+  border: 1.5px solid var(--gray-200);
+}
+.btn-outline:hover { border-color: var(--gray-400); color: var(--gray-800); }
+.btn-teal { background: var(--teal); color: #fff; }
+.btn-teal:hover { background: #0d4a56; }
+
+.ml-auto { margin-left: auto; }
+
+
+/* ══════════════════════════════════════════════════
+   VIEW 2 — INFORME FINAL
+══════════════════════════════════════════════════ */
+#view-report {
+  background: var(--gray-100);
+}
+
+.report-toolbar {
+  background: var(--green-dark);
+  padding: 0 24px;
+  height: 52px;
+  display: flex; align-items: center; gap: 12px;
+  flex-shrink: 0;
+}
+.report-toolbar-title {
+  font-size: 13px; font-weight: 600; color: rgba(255,255,255,.9);
+}
+.report-body {
+  flex: 1; overflow-y: auto;
+  padding: 24px;
+  display: flex; justify-content: center;
+}
+
+/* The printable document */
+.doc {
+  background: var(--white);
+  width: 210mm;
+  min-height: 297mm;
+  box-shadow: var(--shadow-lg);
+  padding: 14mm 16mm 12mm;
+  font-family: 'Source Sans 3', sans-serif;
+  font-size: 10pt;
+  color: var(--black);
+  position: relative;
+}
+
+/* Doc header */
+.doc-header {
+  display: flex; align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 8mm;
+  border-bottom: 2px solid var(--green);
+  padding-bottom: 5mm;
+}
+.doc-logo-left { display: flex; flex-direction: column; gap: 3px; }
+.doc-logo-left .junta {
+  font-size: 8pt; color: var(--gray-600);
+  font-weight: 400; line-height: 1.3;
+}
+.doc-logo-left .huvn {
+  font-size: 14pt; font-weight: 800;
+  color: var(--green-dark); letter-spacing: -0.5px;
+  font-family: 'Source Serif 4', serif;
+}
+.doc-logo-left .huvn-sub {
+  font-size: 7.5pt; color: var(--gray-400); letter-spacing: 0.3px;
+}
+.doc-title-block { text-align: center; flex: 1; padding: 0 8mm; }
+.doc-title-block h2 {
+  font-size: 9.5pt; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--green-dark); line-height: 1.3;
+}
+.doc-title-block p { font-size: 8pt; color: var(--gray-600); margin-top: 2px; }
+
+/* Section boxes */
+.doc-box {
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius);
+  margin-bottom: 4mm;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+}
+.doc-box-head {
+  background: var(--green-dark);
+  color: #fff; font-size: 8pt; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.8px;
+  padding: 5px 10px;
+  border-bottom: 2px solid rgba(0,0,0,.1);
+}
+.doc-box-head.teal { background: var(--teal); }
+.doc-box-head.gray { background: #4a5c66; }
+.doc-box-body { padding: 6px 10px; }
+
+/* Field grids */
+.field-row {
+  display: grid; gap: 0;
+  border-bottom: 1px solid var(--gray-100);
+}
+.field-row:last-child { border-bottom: none; }
+.field-row.cols-2 { grid-template-columns: 1fr 1fr; }
+.field-row.cols-3 { grid-template-columns: 2fr 1fr 1fr; }
+.field-row.cols-4 { grid-template-columns: 2fr 1fr 1fr 1fr; }
+.field-row.cols-1-2 { grid-template-columns: 1fr 2fr; }
+.field-row.cols-1 { grid-template-columns: 1fr; }
+
+.field {
+  padding: 5px 10px; border-right: 1px solid var(--gray-100);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.field:last-child { border-right: none; }
+.field-label {
+  font-size: 7pt; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--gray-400); font-weight: 700;
+}
+.field-value {
+  font-size: 9.5pt; color: var(--black);
+  font-weight: 500; min-height: 19px;
+}
+.field-value.auto { color: var(--green-dark); font-weight: 700; }
+.field-value.big  { font-size: 11pt; font-weight: 700; color: var(--green-dark); }
+
+/* Editable inputs inside doc */
+.doc input[type=text], .doc input[type=date] {
+  border: none; border-bottom: 1px dashed var(--gray-200);
+  background: transparent; font-family: inherit;
+  font-size: 9.5pt; color: var(--black); font-weight: 500;
+  width: 100%; outline: none; padding: 0;
+  transition: border-color .15s;
+}
+.doc input[type=text]:focus, .doc input[type=date]:focus {
+  border-bottom-color: var(--green);
+  background: rgba(46,125,79,.03);
+}
+
+/* Data tables inside doc */
+.doc-table {
+  width: 100%; border-collapse: collapse;
+  font-size: 8.5pt;
+}
+.doc-table thead th {
+  background: var(--green);
+  color: #fff; font-weight: 700;
+  text-transform: uppercase; font-size: 7.5pt;
+  letter-spacing: 0.6px; padding: 5px 8px; text-align: left;
+  border-bottom: 2px solid var(--green-dark);
+}
+.doc-table thead th.teal-h { background: var(--teal); border-bottom-color: #0d4a56; }
+.doc-table tbody tr { border-bottom: 1px solid var(--gray-100); }
+.doc-table tbody tr:nth-child(even) { background: #fafcfb; }
+.doc-table tbody tr:hover { background: var(--green-pale); }
+.doc-table td { padding: 5px 8px; color: var(--gray-800); }
+.doc-table td.right { text-align: right; }
+.doc-table td.center { text-align: center; }
+.doc-table .total-row td {
+  background: var(--green-light) !important;
+  font-weight: 700; color: var(--green-dark);
+  border-top: 2px solid var(--green);
+  font-size: 9pt;
+}
+
+/* Calc block */
+.calc-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 8px; padding: 6px 0;
+}
+.calc-item {
+  display: flex; align-items: center;
+  justify-content: space-between;
+  padding: 3px 8px;
+  background: var(--gray-50); border-radius: 3px;
+}
+.calc-item-label { font-size: 8pt; color: var(--gray-600); }
+.calc-item-value {
+  font-size: 9.5pt; font-weight: 700; color: var(--green-dark);
+  font-family: monospace;
+}
+
+/* Manual fields block */
+.manual-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 6px; padding: 6px 0;
+}
+.manual-row {
+  display: flex; gap: 8px; align-items: center;
+  padding: 3px 8px; background: var(--gray-50); border-radius: 3px;
+}
+.manual-row label { font-size: 8pt; color: var(--gray-600); white-space: nowrap; min-width: 100px; }
+
+/* A Pagar block */
+.pagar-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 8px; padding: 6px 0;
+}
+.pagar-cell {
+  text-align: center; padding: 6px;
+  background: var(--gray-50); border-radius: 3px;
+  border: 1px solid var(--gray-200);
+}
+.pagar-cell-label { font-size: 7pt; color: var(--gray-400); text-transform: uppercase; }
+.pagar-cell-value { font-size: 10pt; font-weight: 800; color: var(--green-dark); }
+
+/* Firma block */
+.firma-block {
+  margin-top: 6mm; padding-top: 4mm;
+  border-top: 1px solid var(--gray-200);
+  display: flex; justify-content: space-between; align-items: flex-end;
+}
+.firma-col { display: flex; flex-direction: column; gap: 2px; }
+.firma-label { font-size: 7.5pt; color: var(--gray-400); }
+.firma-value { font-size: 8.5pt; color: var(--gray-800); }
+.firma-line {
+  border-bottom: 1px solid var(--gray-300);
+  min-width: 120px; height: 22px;
+}
+.doc-note {
+  font-size: 7.5pt; color: var(--gray-400);
+  font-style: italic; margin-top: 4mm;
+  padding-top: 3mm; border-top: 1px dotted var(--gray-200);
+}
+
+/* Próximo Trienio editable table */
+.pt-input {
+  border: none; border-bottom: 1px dashed var(--gray-200);
+  background: transparent; font-family: inherit;
+  font-size: 8.5pt; color: var(--black); width: 100%;
+  outline: none; padding: 0;
+}
+.pt-input:focus { border-bottom-color: var(--green); background: rgba(46,125,79,.03); }
+.pt-input.right-input { text-align: right; }
+.pt-label { font-size: 8pt; font-weight: 700; color: var(--gray-600); text-transform: uppercase; letter-spacing: 0.3px; }
+.del-row-btn {
+  background: none; border: none; color: var(--gray-400);
+  cursor: pointer; font-size: 10px; padding: 2px 4px;
+  border-radius: 3px; transition: all .12s;
+}
+.del-row-btn:hover { background: #fee2e2; color: var(--accent); }
+.add-row-btn {
+  background: var(--gray-100); border: 1px solid var(--gray-200);
+  color: var(--gray-600); font-size: 10px; font-weight: 600;
+  padding: 4px 10px; border-radius: 3px; cursor: pointer;
+  transition: all .12s; font-family: inherit;
+}
+.add-row-btn:hover { background: var(--green-light); border-color: var(--green-mid); color: var(--green-dark); }
+.field-row.cols-1 { grid-template-columns: 1fr; }
+
+
+/* ── PRINT ──────────────────────────────────────── */
+@page {
+  size: A4;
+  /* margin: 0 elimina headers/footers del navegador (fecha, URL, nº página).
+     Usamos padding interno en .doc para los márgenes reales */
+  margin: 10mm 0 12mm 0;
+}
+
+@media print {
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+
+  body { background: white; margin: 0; padding: 0; }
+  #view-selector  { display: none !important; }
+  #view-report    { display: block !important; height: auto; }
+  .report-toolbar { display: none !important; }
+  .no-print       { display: none !important; }
+  .del-row-btn    { display: none !important; }
+  .add-row-btn    { display: none !important; }
+
+  .report-body {
+    padding: 0; overflow: visible; display: block;
+    background: white;
+  }
+
+  /* Contenedor del documento: márgenes propios */
+  .doc {
+    box-shadow: none;
+    width: 100%;
+    min-height: 0;
+    /* Márgenes internos: superior e inferior con espacio para nuestro pie propio */
+    padding: 12mm 14mm 16mm 14mm;
+    font-size: 8.5pt;
+    position: relative;
+  }
+
+  /* Ocultar bordes de inputs, mostrar solo el valor */
+  .doc input[type=text],
+  .doc input[type=date] {
+    border: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+  }
+
+  /* ── Pie de página propio en cada hoja ── */
+  .doc-footer-print {
+    display: block !important;
+    position: running(footer);
+    font-size: 7pt;
+    color: #9baab4;
+    text-align: center;
+    border-top: 1pt solid #dde3e7;
+    padding-top: 3pt;
+    font-style: italic;
+  }
+  @page {
+    @bottom-center {
+      content: element(footer);
+    }
+  }
+
+  /* Fallback pie: colocado al final del doc con margin-top auto */
+  .doc-note {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    margin-top: 6mm;
+  }
+
+  /* ── Cabecera del doc: no se repite (está dentro del flujo) ── */
+  .doc-header {
+    margin-bottom: 4mm;
+    padding-bottom: 3mm;
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+
+  /* ── Secciones pequeñas: nunca se cortan ── */
+  .doc-box {
+    margin-bottom: 3mm;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* ── Tablas largas: pueden paginar, thead se repite ── */
+  .doc-box.allow-break {
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+  }
+  .doc-box.allow-break tbody tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .doc-table thead {
+    display: table-header-group;
+  }
+  /* tfoot NO usa table-footer-group para evitar que se repita en cada salto de página */
+  .doc-table tfoot {
+    display: table-row-group;
+  }
+
+  /* Cuando una tabla con allow-break rompe página,
+     repetir visualmente la cabecera del doc-box como caption */
+  .doc-box.allow-break .doc-box-head {
+    display: table-caption;
+    caption-side: top;
+  }
+
+  /* ── Firma y notas: nunca se cortan ── */
+  .firma-block {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    margin-top: 5mm;
+    padding-top: 3mm;
+  }
+
+  /* ── Compactar padding en impresión ── */
+  .doc-table td,
+  .doc-table th    { padding: 2px 5px !important; }
+  .field           { padding: 2px 5px !important; }
+  .doc-box-head    { padding: 2px 8px !important; font-size: 7pt !important; }
+  .doc-box-body    { padding: 3px 8px !important; }
+  .calc-item       { padding: 1px 6px !important; }
+
+  /* Mini cabecera compacta en página 2+:
+     Se activa poniendo display:flex en el elemento .doc-page-break-header
+     cuando hay salto de página. Como CSS puro no puede detectar esto,
+     usamos la estrategia de mostrar un encabezado fijo que solo aparece
+     en impresión como running header mediante position:running — fallback
+     compatible con Chrome/Edge: lo mostramos siempre en print y le damos
+     page-break-before:avoid para que no cree página extra */
+  .doc-page-break-header {
+    display: flex !important;
+    page-break-before: avoid;
+    break-before: avoid;
+    page-break-after: avoid;
+    break-after: avoid;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}
+
+/* Mini cabecera página 2+ — solo visible en print */
+.doc-page-break-header {
+  display: none;
+  border-bottom: 2px solid var(--green);
+  padding-bottom: 3mm;
+  margin-bottom: 4mm;
+  align-items: center;
+  gap: 12px;
+}
+.doc-footer-print { display: none; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- ══ VIEW 1: SELECTOR ══════════════════════════════════════════ -->
+<div class="view active" id="view-selector">
+
+  <header class="app-header">
+    <div class="app-logo">
+      <div class="app-logo-icon">🏥</div>
+      <div class="app-logo-text">Trienios <span>· HUVN</span></div>
+    </div>
+    <div class="app-header-center"><h1>Sistema de Gestión de Trienios</h1></div>
+    <span class="header-badge badge-sel" id="hdr-total">0 periodos seleccionados</span>
+  </header>
+
+  <div class="toolbar">
+    <div class="toolbar-section">
+      <span class="sel-pill sel-pill-green">Anexo I: <span class="num" id="cnt-pdf">0</span></span>
+      <span class="sel-pill sel-pill-teal">Trienios CSV: <span class="num" id="cnt-csv">0</span></span>
+    </div>
+    <div class="toolbar-divider"></div>
+    <button class="btn btn-outline" onclick="clearAll()">Limpiar selección</button>
+    <div class="toolbar-divider"></div>
+    <div class="toolbar-section ml-auto">
+      <button class="btn btn-teal" onclick="exportWord()">⬇ Word</button>
+      <button class="btn btn-primary" id="btn-informe" onclick="showReport()" disabled>
+        Ver Informe Final →
+      </button>
+    </div>
+  </div>
+
+  <div class="panels-grid">
+
+    <!-- PANEL PDF -->
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-head-title">📄 Anexo I — Servicios Prestados (PDF)</span>
+        <span class="panel-head-sub" id="pdf-rows-count"></span>
+        <button class="btn-selall" id="btn-selall-pdf" onclick="selectAllPDF()" style="display:none">Seleccionar todo</button>
+      </div>
+
+      <div class="upload-area">
+        <input type="file" id="input-pdf" accept=".pdf" onchange="loadPDF(this.files[0])">
+        <div class="upload-zone" id="zone-pdf"
+             onclick="document.getElementById('input-pdf').click()"
+             ondragover="event.preventDefault();this.classList.add('dragover')"
+             ondragleave="this.classList.remove('dragover')"
+             ondrop="handleDrop(event,'pdf')">
+          <div class="upload-icon-wrap">📑</div>
+          <div>
+            <div class="upload-text-main">Selecciona o arrastra el PDF del Anexo I</div>
+            <div class="upload-text-sub">Archivo PDF con certificación de servicios</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="progress" id="prog-pdf"><div class="spinner"></div>Procesando PDF…</div>
+
+      <div class="worker-strip" id="worker-strip">
+        <div class="worker-strip-name" id="worker-name-display"></div>
+        <div class="worker-strip-dni"  id="worker-dni-display"></div>
+      </div>
+
+      <div class="table-wrap">
+        <div class="empty" id="pdf-empty">📋 Carga el PDF para ver los periodos</div>
+        <table class="data-table" id="pdf-table" style="display:none">
+          <thead><tr>
+            <th style="width:22px"></th>
+            <th>Destino</th>
+            <th>Categoría</th>
+            <th>T.</th>
+            <th>Vínc.</th>
+            <th>Inicio</th>
+            <th>Fin</th>
+            <th>Nivel</th>
+          </tr></thead>
+          <tbody id="pdf-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PANEL CSV -->
+    <div class="panel">
+      <div class="panel-head teal">
+        <span class="panel-head-title">📊 Informe Trienios (CSV)</span>
+        <span class="panel-head-sub" id="csv-rows-count"></span>
+        <button class="btn-selall" id="btn-selall-csv" onclick="selectAllCSV()" style="display:none">Seleccionar todo</button>
+      </div>
+
+      <div class="upload-area">
+        <input type="file" id="input-csv" accept=".csv" onchange="loadCSV(this.files[0])">
+        <div class="upload-zone" id="zone-csv"
+             onclick="document.getElementById('input-csv').click()"
+             ondragover="event.preventDefault();this.classList.add('dragover')"
+             ondragleave="this.classList.remove('dragover')"
+             ondrop="handleDrop(event,'csv')">
+          <div class="upload-icon-wrap teal">📈</div>
+          <div>
+            <div class="upload-text-main">Selecciona o arrastra el CSV de Trienios</div>
+            <div class="upload-text-sub">Informe de trienios con periodos y cuantías</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="progress" id="prog-csv"><div class="spinner"></div>Procesando CSV…</div>
+
+      <div class="table-wrap">
+        <div class="empty" id="csv-empty">📋 Carga el CSV para ver los periodos</div>
+        <table class="data-table" id="csv-table" style="display:none">
+          <thead><tr>
+            <th style="width:22px"></th>
+            <th>Mes / Año</th>
+            <th>Nº Trienios</th>
+            <th>Cuantía</th>
+            <th>Percibió</th>
+            <th>Diferencia</th>
+          </tr></thead>
+          <tbody id="csv-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /panels-grid -->
+</div><!-- /view-selector -->
+
+
+<!-- ══ VIEW 2: INFORME FINAL ═══════════════════════════════════════ -->
+<div class="view" id="view-report">
+  <div class="report-toolbar">
+    <button class="btn btn-outline" style="border-color:rgba(255,255,255,.3);color:#fff" onclick="showSelector()">← Volver a selección</button>
+    <span class="report-toolbar-title">Informe de Cálculo de Trienios</span>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button class="btn btn-teal" onclick="exportWord()">⬇ Word</button>
+      <button class="btn btn-primary" onclick="window.print()">🖨 Imprimir</button>
+    </div>
+  </div>
+
+  <div class="report-body">
+    <div class="doc" id="doc">
+
+      <!-- DOC HEADER — página 1 -->
+      <div class="doc-header">
+        <div class="doc-logo-left">
+          <div class="junta">Junta de Andalucía<br>Consejería de Salud y Consumo</div>
+          <div class="huvn">HUVN</div>
+          <div class="huvn-sub">HOSPITAL UNIVERSITARIO VIRGEN DE LAS NIEVES</div>
+        </div>
+        <div class="doc-title-block">
+          <h2>Nuevo Reconocimiento<br>Servicios Prestados</h2>
+          <p>Servicio Andaluz de Salud</p>
+        </div>
+        <div style="text-align:right;font-size:8pt;color:var(--gray-400)">
+          <div id="doc-date-display"></div>
+        </div>
+      </div>
+
+      <!-- ① APELLIDOS, NIF, CATEGORÍA, FECHA REGISTRO -->
+      <div class="doc-box">
+        <div class="doc-box-head">Datos del Trabajador</div>
+        <div class="doc-box-body" style="padding:0">
+          <div class="field-row cols-2">
+            <div class="field" style="border-bottom:1px solid var(--gray-100)">
+              <span class="field-label">Apellidos y Nombre</span>
+              <div class="field-value"><input type="text" id="f-nombre" placeholder="Apellidos, Nombre"></div>
+            </div>
+            <div class="field" style="border-bottom:1px solid var(--gray-100)">
+              <span class="field-label">N.I.F.</span>
+              <div class="field-value"><input type="text" id="f-nif" placeholder="00000000X"></div>
+            </div>
+          </div>
+          <div class="field-row cols-2">
+            <div class="field">
+              <span class="field-label">Categoría</span>
+              <div class="field-value"><input type="text" id="f-categoria" placeholder="Ej: Auxiliar Administrativo"></div>
+            </div>
+            <div class="field">
+              <span class="field-label">Fecha Registro Solicitud</span>
+              <div class="field-value"><input type="text" id="f-fecha-solicitud" placeholder="dd/mm/aaaa"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TABLA PERIODOS PDF — auto -->
+      <div class="doc-box allow-break">
+        <div class="doc-box-head">Periodos Reconocidos — Anexo I</div>
+        <div class="doc-box-body" style="padding:0">
+          <table class="doc-table">
+            <thead><tr>
+              <th>Categoría / Destino</th><th>Nivel</th><th>Vínculo</th>
+              <th>Inicio</th><th>Fin</th><th class="right">Nº Días</th>
+            </tr></thead>
+            <tbody id="doc-pdf-tbody">
+              <tr><td colspan="6" style="text-align:center;color:var(--gray-400);padding:8px;font-size:8pt">Sin periodos seleccionados</td></tr>
+            </tbody>
+            <tfoot id="doc-pdf-tfoot"></tfoot>
+          </table>
+        </div>
+      </div>
+
+      <!-- CÁLCULO AUTOMÁTICO -->
+      <div class="doc-box">
+        <div class="doc-box-head">Cálculo Nº Años, Meses y Días — Cumplimentar Resolución</div>
+        <div class="doc-box-body" style="padding:4px 0">
+          <table style="width:100%;border-collapse:collapse;font-size:8.5pt">
+            <tbody>
+              <tr style="border-bottom:1px solid var(--gray-100)">
+                <td style="padding:4px 10px;color:var(--gray-600)">Total Definitivo de Días a Reconocer</td>
+                <td style="padding:4px 10px;font-weight:700;color:var(--green-dark);font-family:monospace;text-align:right;background:var(--green-pale)" id="calc-dias">0</td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--gray-100)">
+                <td style="padding:4px 10px;color:var(--gray-600)">Meses con Decimal</td>
+                <td style="padding:4px 10px;font-weight:700;color:var(--green-dark);font-family:monospace;text-align:right;background:var(--green-pale)" id="calc-meses-dec">0,00</td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--gray-100)">
+                <td style="padding:4px 10px;color:var(--gray-600)">Meses sin Decimal</td>
+                <td style="padding:4px 10px;font-weight:700;color:var(--green-dark);font-family:monospace;text-align:right;background:var(--green-pale)" id="calc-meses">0</td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--gray-100)">
+                <td style="padding:4px 10px;font-weight:700;color:var(--black)">Años</td>
+                <td style="padding:4px 10px;font-weight:800;font-size:10pt;color:var(--green-dark);font-family:monospace;text-align:right;background:var(--green-light)" id="calc-anios">0</td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--gray-100)">
+                <td style="padding:4px 10px;font-weight:700;color:var(--black)">Meses</td>
+                <td style="padding:4px 10px;font-weight:800;font-size:10pt;color:var(--green-dark);font-family:monospace;text-align:right;background:var(--green-light)" id="calc-meses-r">0</td>
+              </tr>
+              <tr>
+                <td style="padding:4px 10px;font-weight:700;color:var(--black)">Días</td>
+                <td style="padding:4px 10px;font-weight:800;font-size:10pt;color:var(--green-dark);font-family:monospace;text-align:right;background:var(--green-light)" id="calc-dias-r">0</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ② TOTAL TRIENIOS + FECHA VENCIMIENTO -->
+      <div class="doc-box">
+        <div class="doc-box-head gray">Total Trienios y Fechas de Vencimiento</div>
+        <div class="doc-box-body" style="padding:0">
+          <div class="field-row cols-2">
+            <div class="field">
+              <span class="field-label">Total Trienios (Nº y Grupo)</span>
+              <div class="field-value big"><input type="text" id="f-total-trienios" placeholder="Ej: 6 (A2)"></div>
+            </div>
+            <div class="field">
+              <span class="field-label">Fecha Vencimiento Total Trienios</span>
+              <div class="field-value big"><input type="text" id="f-fecha-vencimiento" placeholder="dd/mm/aaaa"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ③ FECHA VENCIMIENTO PRÓXIMO TRIENIO — tabla editable -->
+      <div class="doc-box">
+        <div class="doc-box-head gray">Fecha Vencimiento Próximo Trienio</div>
+        <div class="doc-box-body" style="padding:0">
+          <table class="doc-table" id="proxtrienio-table">
+            <thead>
+              <tr>
+                <th style="width:28%">Concepto</th>
+                <th>Fecha Inicio</th>
+                <th>Fecha Fin</th>
+                <th class="right">Importe</th>
+                <th style="width:28px;background:var(--gray-600)" class="no-print"></th>
+              </tr>
+            </thead>
+            <tbody id="proxtrienio-tbody">
+              <!-- filas IMPORTE MES -->
+              <tr class="pt-row" data-tipo="mes">
+                <td><input type="text" class="pt-input pt-concepto" value="IMPORTE MES" placeholder="Concepto"></td>
+                <td><input type="text" class="pt-input" placeholder="01/01/2023"></td>
+                <td><input type="text" class="pt-input" placeholder="31/12/2023"></td>
+                <td><input type="text" class="pt-input right-input" placeholder="50,07"></td>
+                <td class="no-print" style="text-align:center"><button class="del-row-btn" onclick="delPTRow(this)" title="Eliminar">✕</button></td>
+              </tr>
+              <tr class="pt-row" data-tipo="mes">
+                <td><input type="text" class="pt-input pt-concepto" value="" placeholder="Concepto"></td>
+                <td><input type="text" class="pt-input" placeholder="01/01/2024"></td>
+                <td><input type="text" class="pt-input" placeholder="31/12/2024"></td>
+                <td><input type="text" class="pt-input right-input" placeholder="51,07"></td>
+                <td class="no-print" style="text-align:center"><button class="del-row-btn" onclick="delPTRow(this)" title="Eliminar">✕</button></td>
+              </tr>
+              <!-- filas IMPORTE EXTRA -->
+              <tr class="pt-row" data-tipo="extra">
+                <td><input type="text" class="pt-input pt-concepto" value="IMPORTE EXTRA" placeholder="Concepto"></td>
+                <td><input type="text" class="pt-input" placeholder="01/12/2022"></td>
+                <td><input type="text" class="pt-input" placeholder="30/11/2023"></td>
+                <td><input type="text" class="pt-input right-input" placeholder="30,91"></td>
+                <td class="no-print" style="text-align:center"><button class="del-row-btn" onclick="delPTRow(this)" title="Eliminar">✕</button></td>
+              </tr>
+              <tr class="pt-row" data-tipo="extra">
+                <td><input type="text" class="pt-input pt-concepto" value="" placeholder="Concepto"></td>
+                <td><input type="text" class="pt-input" placeholder="01/12/2023"></td>
+                <td><input type="text" class="pt-input" placeholder="30/11/2024"></td>
+                <td><input type="text" class="pt-input right-input" placeholder="31,53"></td>
+                <td class="no-print" style="text-align:center"><button class="del-row-btn" onclick="delPTRow(this)" title="Eliminar">✕</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <div style="padding:6px 10px;display:flex;gap:8px;background:var(--gray-50);border-top:1px solid var(--gray-100)" class="no-print">
+            <button class="add-row-btn" onclick="addPTRow('mes')">+ Fila Importe Mes</button>
+            <button class="add-row-btn" onclick="addPTRow('extra')">+ Fila Importe Extra</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- LIQUIDACIÓN ATRASOS — auto CSV -->
+      <div class="doc-box allow-break">
+        <div class="doc-box-head teal">Liquidación de Atrasos</div>
+        <div class="doc-box-body" style="padding:0">
+          <div style="padding:5px 10px;background:var(--blue-pale);border-bottom:1px solid var(--gray-200);display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:8pt;color:var(--gray-600)">
+            <span>Solicitud:
+              <input type="text" id="f-fecha-solicitud2" placeholder="dd/mm/aaaa"
+                style="width:88px;border:none;border-bottom:1px dashed var(--gray-300);font-size:8pt;background:transparent;outline:none;color:var(--black)">
+            </span>
+            <span>Atrasos del
+              <input type="text" id="f-trienio-atraso" placeholder="1 Trienio del Grupo A2"
+                style="width:150px;border:none;border-bottom:1px dashed var(--gray-300);font-size:8pt;background:transparent;outline:none;color:var(--black)">
+            </span>
+            <span>
+              <input type="text" id="f-periodo-desde" placeholder="01/11/2023"
+                style="width:80px;border:none;border-bottom:1px dashed var(--gray-300);font-size:8pt;background:transparent;outline:none;color:var(--black)">
+              –
+              <input type="text" id="f-periodo-hasta" placeholder="31/05/2024"
+                style="width:80px;border:none;border-bottom:1px dashed var(--gray-300);font-size:8pt;background:transparent;outline:none;color:var(--black)">
+            </span>
+          </div>
+          <table class="doc-table">
+            <thead><tr>
+              <th class="teal-h">Mes / Año</th>
+              <th class="teal-h">Nº Trienios</th>
+              <th class="teal-h right">Cuantía</th>
+              <th class="teal-h right">Percibió</th>
+              <th class="teal-h right">Diferencia</th>
+            </tr></thead>
+            <tbody id="doc-csv-tbody">
+              <tr><td colspan="5" style="text-align:center;color:var(--gray-400);padding:8px;font-size:8pt">Sin periodos seleccionados</td></tr>
+            </tbody>
+            <tfoot id="doc-csv-tfoot"></tfoot>
+          </table>
+        </div>
+      </div>
+
+      <!-- ④ A PAGAR — tabla dinámica -->
+      <div class="doc-box">
+        <div class="doc-box-head gray">A Pagar</div>
+        <div class="doc-box-body" style="padding:0">
+          <table class="doc-table">
+            <thead>
+              <tr>
+                <th style="width:40%">Grupo</th>
+                <th class="right">Importe</th>
+                <th style="width:28px;background:var(--gray-600)" class="no-print"></th>
+              </tr>
+            </thead>
+            <tbody id="apagar-tbody">
+              <tr class="ap-row">
+                <td><input type="text" class="pt-input ap-grupo" placeholder="Ej: 1"></td>
+                <td><input type="text" class="pt-input right-input ap-importe" placeholder="0,00" oninput="updateApagarTotal()"></td>
+                <td class="no-print" style="text-align:center"><button class="del-row-btn" onclick="delAPRow(this)" title="Eliminar">✕</button></td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr class="total-row" id="apagar-tfoot-row">
+                <td style="font-weight:700;font-size:9pt">TOTAL A ABONAR</td>
+                <td class="right mono" id="apagar-subtotal" style="font-size:10pt;color:var(--green-dark)">0,00 €</td>
+                <td class="no-print"></td>
+              </tr>
+            </tfoot>
+          </table>
+          <div style="padding:6px 10px;display:flex;gap:8px;align-items:center;background:var(--gray-50);border-top:1px solid var(--gray-100)" class="no-print">
+            <button class="add-row-btn" onclick="addAPRow()">+ Añadir fila</button>
+            <span style="margin-left:auto;font-size:8pt;color:var(--gray-400)">Fecha: <strong id="pagar-fecha-hoy" style="color:var(--gray-600);font-family:monospace"></strong></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- NOTAS + FIRMA -->
+      <div class="firma-block">
+        <div class="firma-col">
+          <div class="firma-label">(*) Observaciones</div>
+          <input type="text" id="f-notas"
+            placeholder="No tiene Reducción Jornada. No tiene Permiso sin Sueldo…"
+            style="width:270px;border:none;border-bottom:1px dashed var(--gray-300);font-size:8pt;outline:none;color:var(--gray-600)">
+        </div>
+        <div class="firma-col" style="text-align:right">
+          <div class="firma-label">EL/LA DIRECTOR/A GERENTE</div>
+          <div class="firma-line"></div>
+          <div class="firma-label" style="margin-top:3px">P.S. LA DIRECTORA ECONÓMICO-ADMINISTRATIVA</div>
+          <div style="font-size:7.5pt;color:var(--gray-400)">(Resolución 29/94 de 23 de Diciembre de la Dirección Gerencia del S.A.S.)</div>
+        </div>
+      </div>
+
+      <div class="doc-note" style="display:flex;justify-content:space-between;align-items:center">
+        <span>(*) Documento oficial generado por el Sistema de Gestión de Trienios — HUVN · S.A.S.</span>
+        <span id="doc-gen-date" style="font-family:monospace;font-size:7pt;white-space:nowrap;margin-left:12px"></span>
+      </div>
+
+    </div><!-- /doc -->
+  </div><!-- /report-body -->
+</div><!-- /view-report -->
+
+
+<script>
+// ─── PDFJS ────────────────────────────────────────────────────────────────
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ─── STATE ────────────────────────────────────────────────────────────────
+const S = {
+  worker:      { name:'', dni:'' },
+  pdfRows:     [],
+  csvRows:     [],
+  pdfSel:      new Set(),
+  csvSel:      new Set(),
+  totalDias:   0,
+};
+
+// ─── VIEWS ────────────────────────────────────────────────────────────────
+function showReport() {
+  buildReport();
+  document.getElementById('view-selector').classList.remove('active');
+  document.getElementById('view-report').classList.add('active');
+}
+function showSelector() {
+  document.getElementById('view-report').classList.remove('active');
+  document.getElementById('view-selector').classList.add('active');
+}
+
+// ─── DROP ─────────────────────────────────────────────────────────────────
+function handleDrop(e,t){ e.preventDefault(); document.getElementById('zone-'+t).classList.remove('dragover'); const f=e.dataTransfer.files[0]; if(!f)return; t==='pdf'?loadPDF(f):loadCSV(f); }
+
+// ─── LOAD PDF ─────────────────────────────────────────────────────────────
+async function loadPDF(file){
+  if(!file)return;
+  showProg('pdf',true);
+  try{
+    const ab = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data:ab}).promise;
+    let fullText='';
+    for(let i=1;i<=pdf.numPages;i++){
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const items = content.items;
+      const sorted = [...items].sort((a,b)=>{
+        const dy=Math.round(b.transform[5])-Math.round(a.transform[5]);
+        return dy!==0?dy:a.transform[4]-b.transform[4];
+      });
+      let lines=[],curY=null,curLine=[];
+      for(const item of sorted){
+        const y=Math.round(item.transform[5]);
+        if(curY===null||Math.abs(y-curY)>3){
+          if(curLine.length) lines.push(curLine.map(i=>i.str).join(' '));
+          curLine=[item]; curY=y;
+        } else curLine.push(item);
+      }
+      if(curLine.length) lines.push(curLine.map(i=>i.str).join(' '));
+      fullText+=lines.join('\n')+'\n---PAGE---\n';
+    }
+    parsePDF(fullText);
+    const zone=document.getElementById('zone-pdf');
+    zone.classList.add('loaded');
+    zone.innerHTML=`<div class="upload-icon-wrap">✅</div><div><div class="upload-filename">${file.name}</div><div class="upload-text-sub">${S.pdfRows.length} periodos · clic para cambiar</div></div>`;
+  }catch(err){ console.error(err); alert('Error al leer el PDF: '+err.message); }
+  showProg('pdf',false);
+}
+
+function parsePDF(text){
+  const lines=text.split('\n').map(l=>l.trim()).filter(Boolean);
+  let name='',dni='';
+  for(const l of lines){
+    if(/^\d{8}[A-Z]$/.test(l.replace(/\s/g,''))) dni=l.trim();
+    if(/^[A-ZÁÉÍÓÚÑ\s]+,\s*[A-ZÁÉÍÓÚÑ\s\.]+$/.test(l)&&l.length>5&&l!=='PERSONAL ESTATUTARIO FIJO') name=l.trim();
+  }
+  S.worker={name,dni};
+  document.getElementById('worker-name-display').textContent=name;
+  document.getElementById('worker-dni-display').textContent='DNI: '+dni;
+  document.getElementById('worker-strip').classList.add('visible');
+
+  const dateRe=/\d{2}\/\d{2}\/\d{4}/g;
+  const rows=[];
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i];
+    const dates=line.match(dateRe);
+    if(dates&&dates.length>=2){
+      const inicio=dates[0], fin=dates[1];
+      const before=line.substring(0,line.indexOf(inicio)).trim();
+      const after=line.substring(line.indexOf(fin)+10).trim();
+      const nivelM=after.match(/\b([ABC]\d?)\b/); const nivel=nivelM?nivelM[1]:'';
+      const tipoM=before.match(/\b(SAS|OPE|INEM)\b/); const tipo=tipoM?tipoM[0]:'';
+      const vincM=before.match(/\b(FIJ|TEM|INT)\b/); const vinc=vincM?vincM[0]:'';
+      let destino=before;
+      if(tipo) destino=destino.substring(0,destino.lastIndexOf(tipo)).trim();
+      destino=destino.replace(vinc,'').replace(/\s+/g,' ').trim();
+      let cat='';
+      if(i+1<lines.length){ const m=lines[i+1].match(/\(([^)]+)\)/); if(m) cat=m[1]; }
+      if(destino&&inicio&&fin) rows.push({destino,categoria:cat,tipo,vinculo:vinc,inicio,fin,nivel});
+    }
+  }
+  S.pdfRows=rows; S.pdfSel.clear();
+  renderPDFTable();
+  updateCounts();
+  document.getElementById('pdf-rows-count').textContent=rows.length+' periodos';
+  document.getElementById('pdf-table').style.display='table';
+  document.getElementById('pdf-empty').style.display='none';
+  document.getElementById('btn-selall-pdf').style.display='inline-block';
+}
+
+function renderPDFTable(){
+  const tb=document.getElementById('pdf-tbody');
+  tb.innerHTML=S.pdfRows.map((r,i)=>{
+    const sel=S.pdfSel.has(i);
+    const nc=r.nivel.startsWith('C1')?'tag-c1':r.nivel.startsWith('C2')?'tag-c2':r.nivel.startsWith('B')?'tag-b':'tag-a';
+    const vc=r.vinculo==='FIJ'?'tag-fij':'tag-tem';
+    return `<tr class="${sel?'row-sel-green':''}" onclick="togglePDF(${i})">
+      <td><span class="chk">${sel?'✓':''}</span></td>
+      <td class="strong">${r.destino||'—'}</td>
+      <td>${r.categoria||'—'}</td>
+      <td class="mono">${r.tipo||'—'}</td>
+      <td><span class="tag ${vc}">${r.vinculo||'—'}</span></td>
+      <td class="mono">${r.inicio}</td>
+      <td class="mono">${r.fin}</td>
+      <td><span class="tag ${nc}">${r.nivel||'—'}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── LOAD CSV ─────────────────────────────────────────────────────────────
+async function loadCSV(file){
+  if(!file)return;
+  showProg('csv',true);
+  try{
+    const text=await new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsText(file,'latin1');});
+    parseCSV(text);
+    const zone=document.getElementById('zone-csv');
+    zone.classList.add('loaded','loaded-teal');
+    zone.innerHTML=`<div class="upload-icon-wrap teal">✅</div><div><div class="upload-filename teal">${file.name}</div><div class="upload-text-sub">${S.csvRows.length} periodos · clic para cambiar</div></div>`;
+  }catch(err){ console.error(err); }
+  showProg('csv',false);
+}
+
+function parseCSV(text){
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const sep=text.includes(';')?';':',';
+  const parse=line=>{
+    const r=[];let inQ=false,cur='';
+    for(const c of line){
+      if(c==='"'){inQ=!inQ;continue;}
+      if(c===sep&&!inQ){r.push(cur.trim());cur='';}
+      else cur+=c;
+    }
+    r.push(cur.trim());return r;
+  };
+
+  // Extract worker from first line if not already set
+  if(!S.worker.name&&lines.length>0){
+    const f=parse(lines[0]);
+    if(f[0]&&f[0].includes('DNI')){
+      const m=f[0].match(/^(.+?)\s+DNI\s+(\d+)/i);
+      if(m){S.worker.name=m[1].trim();S.worker.dni=m[2].trim();}
+    }
+  }
+
+  let hIdx=-1;
+  for(let i=0;i<lines.length;i++){
+    const f=parse(lines[i]);
+    if(f[0]&&f[0].toLowerCase().includes('mes')){hIdx=i;break;}
+  }
+
+  const pNum=s=>{const c=s.replace(/\s/g,'');return parseFloat(c)||0;};
+  const mesRe=/\b(Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Sep|Oct|Nov|Dic)[-\s]\d{2}/i;
+  const rows=[];
+
+  for(let i=(hIdx>=0?hIdx+1:0);i<lines.length;i++){
+    const f=parse(lines[i]);
+    if(!f[0])continue;
+    const mes=f[0];
+    if(!mesRe.test(mes))continue;
+    const trienios=f[1]||'';
+    const cuantia=pNum(f[2]||'');
+    const percibio=pNum(f[3]||'');
+    const trieniosNum=parseInt(trienios.replace(/[^0-9]/g,''))||0;
+    const importe=trieniosNum*cuantia;
+    const diferencia=importe-percibio;
+    rows.push({mes,trienios:trienios.trim(),cuantia,percibio,importe,diferencia});
+  }
+
+  S.csvRows=rows; S.csvSel.clear();
+  renderCSVTable();
+  updateCounts();
+  document.getElementById('csv-rows-count').textContent=rows.length+' periodos';
+  document.getElementById('csv-table').style.display='table';
+  document.getElementById('csv-empty').style.display='none';
+  document.getElementById('btn-selall-csv').style.display='inline-block';
+}
+
+function renderCSVTable(){
+  const tb=document.getElementById('csv-tbody');
+  tb.innerHTML=S.csvRows.map((r,i)=>{
+    const sel=S.csvSel.has(i);
+    const dc=r.diferencia>0?'color:var(--green)':r.diferencia<0?'color:var(--accent)':'color:var(--gray-400)';
+    const ds=r.diferencia!==0?(r.diferencia>0?'+':'')+fmt2(r.diferencia)+' €':'—';
+    return `<tr class="${sel?'row-sel-teal':''}" onclick="toggleCSV(${i})">
+      <td><span class="chk">${sel?'✓':''}</span></td>
+      <td class="strong">${r.mes}</td>
+      <td class="mono">${r.trienios||'—'}</td>
+      <td class="mono">${r.cuantia?fmt2(r.cuantia)+' €':'—'}</td>
+      <td class="mono">${fmt2(r.percibio)+' €'}</td>
+      <td class="mono" style="${dc}">${ds}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── TOGGLE ───────────────────────────────────────────────────────────────
+function togglePDF(i){ S.pdfSel.has(i)?S.pdfSel.delete(i):S.pdfSel.add(i); renderPDFTable(); updateCounts(); }
+function toggleCSV(i){ S.csvSel.has(i)?S.csvSel.delete(i):S.csvSel.add(i); renderCSVTable(); updateCounts(); }
+function clearAll(){ S.pdfSel.clear();S.csvSel.clear();renderPDFTable();renderCSVTable();updateCounts(); }
+
+function selectAllPDF(){
+  if(S.pdfSel.size===S.pdfRows.length){
+    S.pdfSel.clear();
+    document.getElementById('btn-selall-pdf').textContent='Seleccionar todo';
+  } else {
+    S.pdfRows.forEach((_,i)=>S.pdfSel.add(i));
+    document.getElementById('btn-selall-pdf').textContent='Deseleccionar todo';
+  }
+  renderPDFTable(); updateCounts();
+}
+function selectAllCSV(){
+  if(S.csvSel.size===S.csvRows.length){
+    S.csvSel.clear();
+    document.getElementById('btn-selall-csv').textContent='Seleccionar todo';
+  } else {
+    S.csvRows.forEach((_,i)=>S.csvSel.add(i));
+    document.getElementById('btn-selall-csv').textContent='Deseleccionar todo';
+  }
+  renderCSVTable(); updateCounts();
+}
+
+function updateCounts(){
+  document.getElementById('cnt-pdf').textContent=S.pdfSel.size;
+  document.getElementById('cnt-csv').textContent=S.csvSel.size;
+  const tot=S.pdfSel.size+S.csvSel.size;
+  document.getElementById('hdr-total').textContent=tot+' periodos seleccionados';
+  document.getElementById('btn-informe').disabled=(tot===0);
+}
+
+// ─── BUILD REPORT ─────────────────────────────────────────────────────────
+function buildReport(){
+  // Date
+  const now=new Date();
+  document.getElementById('doc-date-display').textContent=fmtDate(now);
+  document.getElementById('doc-gen-date').textContent=fmtDate(now);
+
+  // Pre-fill worker
+  if(S.worker.name){
+    document.getElementById('f-nombre').value=S.worker.name;
+    document.getElementById('f-nif').value=S.worker.dni;
+  }
+
+  // ── PDF table ──
+  const pdfSelRows=[...S.pdfSel].map(i=>S.pdfRows[i]).filter(Boolean);
+  let totalDias=0;
+  const pdfTbody=document.getElementById('doc-pdf-tbody');
+  if(pdfSelRows.length===0){
+    pdfTbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--gray-400);padding:8px;font-size:8pt">Sin periodos seleccionados</td></tr>';
+  } else {
+    pdfTbody.innerHTML=pdfSelRows.map(r=>{
+      const d1=parseDMY(r.inicio), d2=parseDMY(r.fin);
+      const dias=(d1&&d2)?Math.round((d2-d1)/86400000)+1:0;
+      totalDias+=dias;
+      return `<tr>
+        <td>${r.categoria?r.categoria+' — ':''}<span style="color:var(--gray-600);font-size:8pt">${r.destino}</span></td>
+        <td class="center"><span class="tag ${r.nivel.startsWith('C1')?'tag-c1':r.nivel.startsWith('C2')?'tag-c2':r.nivel.startsWith('B')?'tag-b':'tag-a'}">${r.nivel||'—'}</span></td>
+        <td class="center"><span class="tag ${r.vinculo==='FIJ'?'tag-fij':'tag-tem'}">${r.vinculo||'—'}</span></td>
+        <td class="mono">${r.inicio}</td>
+        <td class="mono">${r.fin}</td>
+        <td class="right mono">${dias.toLocaleString('es-ES')}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // PDF tfoot total + días solapados
+  S.totalDias=totalDias;
+  const solapados=calcDiasSolapados(pdfSelRows);
+  document.getElementById('doc-pdf-tfoot').innerHTML=pdfSelRows.length>0
+    ?`<tr class="total-row"><td colspan="5" style="text-align:right;font-weight:700">TOTAL DÍAS A RECONOCER</td><td class="right mono" style="font-size:10pt">${totalDias.toLocaleString('es-ES')}</td></tr>
+      <tr class="total-row"><td colspan="5" style="text-align:right;font-weight:700">DÍAS SOLAPADOS</td><td class="right mono" style="font-size:10pt;padding:2px 5px">${
+        solapados>0
+          ?`<input type="text" id="dias-solapados-input" value="${solapados}" oninput="recalcDefinitivo()"
+              style="width:60px;border:none;border-bottom:1px dashed var(--accent);background:transparent;outline:none;font-family:monospace;font-size:10pt;font-weight:700;color:var(--accent);text-align:right" title="Días solapados detectados — editable">`
+          :`<span id="dias-solapados-val">0</span>`
+      }</td></tr>`
+    :'';
+
+  // Calc block (Total Definitivo = días a reconocer − días solapados)
+  recalcDefinitivo();
+
+  // ── CSV table ──
+  const csvSelRows=[...S.csvSel].map(i=>S.csvRows[i]).filter(Boolean);
+  const csvTbody=document.getElementById('doc-csv-tbody');
+  if(csvSelRows.length===0){
+    csvTbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--gray-400);padding:8px;font-size:8pt">Sin periodos seleccionados</td></tr>';
+  } else {
+    csvTbody.innerHTML=csvSelRows.map((r,idx)=>{
+      // Cuantía ya ES el total del mes — diferencia = cuantía - percibió
+      const importe = r.cuantia;
+      const difInicial = importe - r.percibio;
+      const dc = difInicial > 0.005 ? 'color:var(--green-dark)' : difInicial < -0.005 ? 'color:var(--accent)' : 'color:var(--gray-400)';
+      const difTxt = Math.abs(difInicial) < 0.005 ? '0,00 €' : (difInicial > 0 ? '+' : '') + fmt2(difInicial) + ' €';
+      return `<tr data-idx="${idx}" data-importe="${importe}">
+        <td class="strong">${r.mes}</td>
+        <td class="mono center" style="padding:2px 4px">
+          <input type="text" class="pt-input" value="${r.trienios}"
+            style="width:52px;font-size:8.5pt;text-align:center" placeholder="Ej: 6B">
+        </td>
+        <td class="mono right">${fmt2(r.cuantia)} €</td>
+        <td class="mono right" style="padding:2px 5px">
+          <input type="text" class="csv-percibio pt-input right-input"
+            value="${fmt2(r.percibio)}"
+            style="width:70px;font-size:8.5pt"
+            oninput="recalcCSVRow(this)" placeholder="0,00">
+        </td>
+        <td class="mono right csv-dif" style="${dc}">${difTxt}</td>
+      </tr>`;
+    }).join('');
+  }
+  // Calcular total diferencia y sincronizar A Pagar siempre
+  const csvDif = recalcCSVTotals();
+  const apagarBody = document.getElementById('apagar-tbody');
+  const firstImporte = apagarBody.querySelector('.ap-importe');
+  if (firstImporte) {
+    firstImporte.value = csvDif.toFixed(2).replace('.', ',');
+  }
+  updateApagarTotal();
+}
+
+// ─── DÍAS SOLAPADOS ───────────────────────────────────────────────────────
+
+// Días contados más de una vez entre los periodos seleccionados:
+// suma de días de cada periodo − días de la unión de los rangos de fechas
+function calcDiasSolapados(rows){
+  const DAY=86400000;
+  const ranges=rows.map(r=>{
+    const d1=parseDMY(r.inicio), d2=parseDMY(r.fin);
+    if(!d1||!d2||d2<d1) return null;
+    return [Math.round(d1.getTime()/DAY), Math.round(d2.getTime()/DAY)];
+  }).filter(Boolean).sort((a,b)=>a[0]-b[0]);
+  if(ranges.length<2) return 0;
+  let total=0;
+  ranges.forEach(([a,b])=>{ total+=b-a+1; });
+  let union=0, curA=ranges[0][0], curB=ranges[0][1];
+  for(let i=1;i<ranges.length;i++){
+    const [a,b]=ranges[i];
+    if(a<=curB){ if(b>curB) curB=b; }
+    else { union+=curB-curA+1; curA=a; curB=b; }
+  }
+  union+=curB-curA+1;
+  return total-union;
+}
+
+function getDiasSolapados(){
+  const inp=document.getElementById('dias-solapados-input');
+  if(!inp) return 0;
+  return Math.max(0, parseInt(String(inp.value).replace(/[^0-9]/g,''),10)||0);
+}
+
+function recalcDefinitivo(){
+  const totalDias=S.totalDias||0;
+  const solapados=Math.min(getDiasSolapados(), totalDias);
+  const definitivo=totalDias-solapados;
+  const mesesDec=definitivo/30.4167;
+  const meses=Math.floor(mesesDec);
+  const anios=Math.floor(meses/12);
+  const mesesResto=meses%12;
+  const diasResto=Math.round((mesesDec-meses)*30.4167);
+  document.getElementById('calc-dias').textContent=definitivo.toLocaleString('es-ES');
+  document.getElementById('calc-meses-dec').textContent=mesesDec.toFixed(2).replace('.',',');
+  document.getElementById('calc-meses').textContent=meses;
+  document.getElementById('calc-anios').textContent=anios;
+  document.getElementById('calc-meses-r').textContent=mesesResto;
+  document.getElementById('calc-dias-r').textContent=diasResto;
+}
+
+// ─── CSV PERCIBIÓ EDITABLE ────────────────────────────────────────────────
+
+// Convierte "300,30" o "300.30" o "1.300,30" o "1,300.30" a float robusto
+function parseEuro(s) {
+  if (!s && s !== 0) return 0;
+  const str = String(s).replace(/\s/g, '');
+  // Si tiene coma Y punto, el último separador es el decimal
+  if (str.includes(',') && str.includes('.')) {
+    const lastComma = str.lastIndexOf(',');
+    const lastDot   = str.lastIndexOf('.');
+    if (lastComma > lastDot) {
+      // formato europeo: 1.300,30
+      return parseFloat(str.replace(/\./g, '').replace(',', '.')) || 0;
+    } else {
+      // formato anglosajón: 1,300.30
+      return parseFloat(str.replace(/,/g, '')) || 0;
+    }
+  }
+  // Solo coma → separador decimal europeo: 300,30
+  if (str.includes(',') && !str.includes('.')) {
+    return parseFloat(str.replace(',', '.')) || 0;
+  }
+  // Solo punto o ninguno
+  return parseFloat(str) || 0;
+}
+
+function recalcCSVRow(inp) {
+  const tr = inp.closest('tr');
+  const importe = parseFloat(tr.dataset.importe) || 0;
+  const percibio = parseEuro(inp.value);
+  const dif = importe - percibio;
+  const difCell = tr.querySelector('.csv-dif');
+  if (difCell) {
+    difCell.textContent = Math.abs(dif) < 0.005 ? '0,00 €' : (dif > 0 ? '+' : '') + fmt2(dif) + ' €';
+    difCell.style.color = dif > 0.005 ? 'var(--green-dark)' : dif < -0.005 ? 'var(--accent)' : 'var(--gray-400)';
+  }
+  const csvDif = recalcCSVTotals();
+  // Sincronizar A Pagar con la nueva diferencia total
+  const firstImporte = document.querySelector('#apagar-tbody .ap-importe');
+  if (firstImporte) firstImporte.value = csvDif.toFixed(2).replace('.', ',');
+  updateApagarTotal();
+}
+
+function recalcCSVTotals() {
+  const tbody = document.getElementById('doc-csv-tbody');
+  const tfoot = document.getElementById('doc-csv-tfoot');
+  if (!tbody) return 0;
+  const rows = tbody.querySelectorAll('tr[data-idx]');
+  if (!rows.length) return 0;
+
+  let totalImporte = 0, totalPercibio = 0;
+  rows.forEach(tr => {
+    const importe  = parseFloat(tr.dataset.importe) || 0;
+    const percibioInp = tr.querySelector('.csv-percibio');
+    const percibio = percibioInp ? parseEuro(percibioInp.value) : 0;
+    totalImporte  += importe;
+    totalPercibio += percibio;
+  });
+  const totalDif = totalImporte - totalPercibio;
+
+  if (tfoot) {
+    tfoot.innerHTML = rows.length > 0
+      ? `<tr class="total-row">
+          <td colspan="2" style="font-weight:700;font-size:9pt">TOTAL A ABONAR</td>
+          <td class="mono right">${fmt2(totalImporte)} €</td>
+          <td class="mono right">${fmt2(totalPercibio)} €</td>
+          <td class="mono right" style="color:${Math.abs(totalDif)<0.005?'var(--gray-400)':totalDif>0?'var(--green-dark)':'var(--accent)'}">${Math.abs(totalDif)<0.005?'0,00 €':(totalDif>=0?'+':'')+fmt2(totalDif)+' €'}</td>
+        </tr>`
+      : '';
+  }
+  return totalDif;
+}
+
+
+function addAPRow() {
+  const tbody = document.getElementById('apagar-tbody');
+  const tr = document.createElement('tr');
+  tr.className = 'ap-row';
+  tr.innerHTML = `
+    <td><input type="text" class="pt-input ap-grupo" placeholder="Ej: 2"></td>
+    <td><input type="text" class="pt-input right-input ap-importe" placeholder="0,00" oninput="updateApagarTotal()"></td>
+    <td class="no-print" style="text-align:center"><button class="del-row-btn" onclick="delAPRow(this)" title="Eliminar">✕</button></td>`;
+  tbody.appendChild(tr);
+}
+
+function delAPRow(btn) {
+  const tbody = document.getElementById('apagar-tbody');
+  const rows = tbody.querySelectorAll('.ap-row');
+  if (rows.length <= 1) {
+    btn.closest('tr').querySelectorAll('input').forEach(i => i.value = '');
+    updateApagarTotal(); return;
+  }
+  btn.closest('tr').remove();
+  updateApagarTotal();
+}
+
+function updateApagarTotal() {
+  const tbody = document.getElementById('apagar-tbody');
+  if (!tbody) return;
+  const inputs = tbody.querySelectorAll('.ap-importe');
+  let total = 0;
+  inputs.forEach(inp => { total += parseEuro(inp.value); });
+  const el = document.getElementById('apagar-subtotal');
+  if (el) el.textContent = fmt2(total) + ' €';
+}
+
+
+function addPTRow(tipo) {
+  const tbody = document.getElementById('proxtrienio-tbody');
+  const tr = document.createElement('tr');
+  tr.className = 'pt-row';
+  tr.dataset.tipo = tipo;
+  const defaultConcepto = tipo === 'mes' ? 'IMPORTE MES' : 'IMPORTE EXTRA';
+  tr.innerHTML = `
+    <td><input type="text" class="pt-input pt-concepto" value="" placeholder="${defaultConcepto}"></td>
+    <td><input type="text" class="pt-input" placeholder="dd/mm/aaaa"></td>
+    <td><input type="text" class="pt-input" placeholder="dd/mm/aaaa"></td>
+    <td><input type="text" class="pt-input right-input" placeholder="0,00"></td>
+    <td class="no-print" style="text-align:center"><button class="del-row-btn" onclick="delPTRow(this)" title="Eliminar">✕</button></td>`;
+  const sameRows = tbody.querySelectorAll(`tr[data-tipo="${tipo}"]`);
+  const lastSame = [...sameRows].pop();
+  if (lastSame) lastSame.after(tr);
+  else tbody.appendChild(tr);
+}
+
+function delPTRow(btn) {
+  const tr = btn.closest('tr');
+  const tipo = tr.dataset.tipo;
+  const tbody = tr.closest('tbody');
+  // Don't delete if it's the only row of its type
+  const sameRows = tbody.querySelectorAll(`tr[data-tipo="${tipo}"]`);
+  if (sameRows.length <= 1) { tr.querySelectorAll('input').forEach(i=>i.value=''); return; }
+  tr.remove();
+}
+
+
+// ─── EXPORT WORD ──────────────────────────────────────────────────────────
+function exportWord() {
+  // Clone the doc node so we can sanitize it without touching the live DOM
+  const docNode = document.getElementById('doc').cloneNode(true);
+
+  // 1. Replace all inputs with their current value as plain text spans
+  docNode.querySelectorAll('input[type=text], input[type=date]').forEach(inp => {
+    const span = document.createElement('span');
+    span.textContent = inp.value || inp.placeholder || '';
+    span.style.cssText = inp.style.cssText;
+    inp.parentNode.replaceChild(span, inp);
+  });
+
+  // 2. Remove no-print elements (buttons, add-row bars, delete buttons)
+  docNode.querySelectorAll('.no-print, .del-row-btn, .add-row-btn').forEach(el => el.remove());
+
+  // 3. Build a self-contained HTML with Word-friendly CSS
+  const wordCSS = `
+    body { font-family: Calibri, Arial, sans-serif; font-size: 10pt; color: #1a252b; margin: 20mm 18mm; }
+    h2 { font-size: 11pt; font-weight: 700; text-transform: uppercase; color: #1a4f32; }
+    .doc-header { display: flex; justify-content: space-between; border-bottom: 2pt solid #2e7d4f; padding-bottom: 6pt; margin-bottom: 10pt; }
+    .huvn { font-size: 16pt; font-weight: 800; color: #1a4f32; }
+    .junta { font-size: 8pt; color: #5a6b76; }
+    .huvn-sub { font-size: 7.5pt; color: #9baab4; }
+    .doc-title-block { text-align: center; }
+    .doc-box { border: 1pt solid #dde3e7; margin-bottom: 6pt; }
+    .doc-box-head { background: #1a4f32; color: white; font-size: 8pt; font-weight: 700;
+      text-transform: uppercase; padding: 3pt 8pt; letter-spacing: 0.4pt; }
+    .doc-box-head.teal { background: #1a6b7a; }
+    .doc-box-head.gray { background: #5a6b76; }
+    .doc-box-body { padding: 4pt 8pt; }
+    .field { padding: 3pt 6pt; border-right: 1pt solid #eef1f3; display: inline-block; }
+    .field-label { font-size: 7pt; text-transform: uppercase; color: #9baab4; font-weight: 700; display: block; }
+    .field-value { font-size: 9.5pt; font-weight: 500; display: block; }
+    .field-row { border-bottom: 1pt solid #eef1f3; display: flex; }
+    table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+    thead th { background: #2e7d4f; color: white; font-size: 7.5pt; font-weight: 700;
+      text-transform: uppercase; padding: 3pt 6pt; text-align: left; }
+    thead th.teal-h { background: #1a6b7a; }
+    tbody tr { border-bottom: 1pt solid #eef1f3; }
+    tbody tr:nth-child(even) { background: #f2faf5; }
+    td { padding: 3pt 6pt; color: #2c3e47; }
+    td.right { text-align: right; }
+    td.center { text-align: center; }
+    tfoot .total-row td { background: #e8f5ee; font-weight: 700; color: #1a4f32; border-top: 1.5pt solid #2e7d4f; }
+    .tag { font-size: 9pt; font-weight: 700; padding: 1pt 3pt; }
+    .tag-c1 { color: #1d4ed8; } .tag-c2 { color: #1a4f32; }
+    .tag-b  { color: #854d0e; } .tag-fij { color: #1e40af; } .tag-tem { color: #92400e; }
+    .pt-label { font-size: 8pt; font-weight: 700; color: #5a6b76; text-transform: uppercase; }
+    .calc-item { display: flex; justify-content: space-between; padding: 2pt 8pt; background: #f8fafb; margin: 1pt 0; }
+    .calc-item-label { font-size: 8pt; color: #5a6b76; }
+    .calc-item-value { font-size: 9pt; font-weight: 700; color: #1a4f32; font-family: monospace; }
+    .firma-block { display: flex; justify-content: space-between; margin-top: 10pt; padding-top: 6pt; border-top: 1pt solid #dde3e7; }
+    .firma-label { font-size: 7.5pt; color: #9baab4; }
+    .firma-line { border-bottom: 1pt solid #aaa; min-width: 100pt; height: 16pt; }
+    .doc-note { font-size: 7pt; color: #9baab4; font-style: italic; margin-top: 6pt; border-top: 1pt dotted #dde3e7; padding-top: 4pt; }
+  `;
+
+  const html = [
+    '<!DOCTYPE html>',
+    '<html xmlns:o="urn:schemas-microsoft-com:office:office"',
+    '      xmlns:w="urn:schemas-microsoft-com:office:word"',
+    '      xmlns="http://www.w3.org/TR/REC-html40">',
+    '<head>',
+    '<meta charset="UTF-8">',
+    '<meta name=ProgId content=Word.Document>',
+    '<meta name=Generator content="Microsoft Word 15">',
+    '<meta name=Originator content="Microsoft Word 15">',
+    '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View>',
+    '<w:Zoom>100</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]-->',
+    '<style>' + wordCSS + '<\/style>',
+    '<\/head>',
+    '<body>' + docNode.innerHTML + '<\/body>',
+    '<\/html>'
+  ].join('\n');
+
+  const blob = new Blob(['\uFEFF' + html], {
+    type: 'application/msword;charset=utf-8'
+  });
+  const nombre = S.worker.dni ? `trienios-${S.worker.dni}.doc` : 'informe-trienios.doc';
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nombre;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ─── INIT ─────────────────────────────────────────────────────────────────
+(function(){
+  const hoy = new Date();
+  const hoyStr = hoy.toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'});
+  const el = document.getElementById('pagar-fecha-hoy');
+  if (el) el.textContent = hoyStr;
+})();
+
+function fmt2(n){ return (n||0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function parseDMY(s){ if(!s)return null; const p=s.split('/'); if(p.length!==3)return null; return new Date(+p[2],+p[1]-1,+p[0]); }
+function fmtDate(d){ return d.toLocaleDateString('es-ES',{day:'2-digit',month:'long',year:'numeric'}); }
+function showProg(t,v){ document.getElementById('prog-'+t).classList.toggle('visible',v); }
+</script>
+</body>
+</html>
