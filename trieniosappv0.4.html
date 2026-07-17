@@ -170,23 +170,25 @@ body {
 .upload-zone {
   border: 2px dashed var(--gray-200);
   border-radius: var(--radius);
-  padding: 14px 16px;
-  display: flex; align-items: center; gap: 12px;
+  padding: 32px 24px;
+  min-height: 130px;
+  display: flex; align-items: center; gap: 16px;
   cursor: pointer; transition: all .15s;
   background: var(--gray-50);
 }
+.upload-zone.dragover { border-color: var(--green); background: var(--green-pale); border-style: solid; }
 .upload-zone:hover { border-color: var(--green-mid); background: var(--green-pale); }
 .upload-zone.loaded { border-color: var(--green-mid); border-style: solid; background: var(--green-pale); }
 .upload-zone.loaded-teal { border-color: var(--teal); background: var(--blue-pale); }
 .upload-icon-wrap {
-  width: 36px; height: 36px; border-radius: 8px;
+  width: 52px; height: 52px; border-radius: 10px;
   background: var(--green-light); display: flex;
   align-items: center; justify-content: center;
-  font-size: 18px; flex-shrink: 0;
+  font-size: 26px; flex-shrink: 0;
 }
 .upload-icon-wrap.teal { background: var(--blue-pale); }
-.upload-text-main { font-size: 12.5px; font-weight: 600; color: var(--gray-800); }
-.upload-text-sub  { font-size: 11px; color: var(--gray-400); font-family: 'Source Serif 4', serif; }
+.upload-text-main { font-size: 14px; font-weight: 600; color: var(--gray-800); }
+.upload-text-sub  { font-size: 12px; color: var(--gray-400); font-family: 'Source Serif 4', serif; }
 .upload-filename  { font-size: 12px; font-weight: 700; color: var(--green); }
 .upload-filename.teal { color: var(--teal); }
 input[type=file] { display: none; }
@@ -1383,12 +1385,8 @@ function buildReport(){
   const solapados=calcDiasSolapados(pdfSelRows);
   document.getElementById('doc-pdf-tfoot').innerHTML=pdfSelRows.length>0
     ?`<tr class="total-row"><td colspan="5" style="text-align:right;font-weight:700">TOTAL DÍAS A RECONOCER</td><td class="right mono" style="font-size:10pt">${totalDias.toLocaleString('es-ES')}</td></tr>
-      <tr class="total-row"><td colspan="5" style="text-align:right;font-weight:700">DÍAS SOLAPADOS</td><td class="right mono" style="font-size:10pt;padding:2px 5px">${
-        solapados>0
-          ?`<input type="text" id="dias-solapados-input" value="${solapados}" oninput="recalcDefinitivo()"
-              style="width:60px;border:none;border-bottom:1px dashed var(--accent);background:transparent;outline:none;font-family:monospace;font-size:10pt;font-weight:700;color:var(--accent);text-align:right" title="Días solapados detectados — editable">`
-          :`<span id="dias-solapados-val">0</span>`
-      }</td></tr>`
+      <tr class="total-row"><td colspan="5" style="text-align:right;font-weight:700">DÍAS SOLAPADOS</td><td class="right mono" style="font-size:10pt;padding:2px 5px"><input type="text" id="dias-solapados-input" value="${solapados}" oninput="recalcDefinitivo()"
+              style="width:60px;border:none;border-bottom:1px dashed var(--accent);background:transparent;outline:none;font-family:monospace;font-size:10pt;font-weight:700;color:var(--accent);text-align:right" title="Días solapados — editable"></td></tr>`
     :'';
 
   // Calc block (Total Definitivo = días a reconocer − días solapados)
