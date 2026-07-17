@@ -22,6 +22,7 @@
   --gray-50:    #f8fafb;
   --gray-100:   #eef1f3;
   --gray-200:   #dde3e7;
+  --gray-300:   #c3ccd3;
   --gray-400:   #9baab4;
   --gray-600:   #5a6b76;
   --gray-800:   #2c3e47;
@@ -329,6 +330,9 @@ input[type=file] { display: none; }
   flex: 1; overflow-y: auto;
   padding: 24px;
   display: flex; justify-content: center;
+  /* flex-start evita que el .doc se estire a la altura visible y el
+     contenido largo se salga de la hoja blanca */
+  align-items: flex-start;
 }
 
 /* The printable document */
@@ -1082,7 +1086,7 @@ input[type=file] { display: none; }
           <div class="firma-label">(*) Observaciones</div>
           <input type="text" id="f-notas"
             placeholder="No tiene Reducción Jornada. No tiene Permiso sin Sueldo…"
-            style="width:270px;border:none;border-bottom:1px dashed var(--gray-300);font-size:8pt;outline:none;color:var(--gray-600)">
+            style="width:360px;border:none;border-bottom:1px dashed var(--gray-300);font-size:8pt;outline:none;color:var(--gray-600)">
         </div>
         <div class="firma-col" style="text-align:right">
           <div class="firma-label">EL/LA DIRECTOR/A GERENTE</div>
@@ -1203,7 +1207,9 @@ function parsePDF(text){
   document.getElementById('pdf-rows-count').textContent=rows.length+' periodos';
   document.getElementById('pdf-table').style.display='table';
   document.getElementById('pdf-empty').style.display='none';
-  document.getElementById('btn-selall-pdf').style.display='inline-block';
+  const selallPdf=document.getElementById('btn-selall-pdf');
+  selallPdf.style.display='inline-block';
+  selallPdf.textContent='Seleccionar todo';
 }
 
 function renderPDFTable(){
@@ -1267,7 +1273,7 @@ function parseCSV(text){
     if(f[0]&&f[0].toLowerCase().includes('mes')){hIdx=i;break;}
   }
 
-  const pNum=s=>{const c=s.replace(/\s/g,'');return parseFloat(c)||0;};
+  const pNum=s=>parseEuro(s||'');
   const mesRe=/\b(Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Sep|Oct|Nov|Dic)[-\s]\d{2}/i;
   const rows=[];
 
@@ -1279,8 +1285,8 @@ function parseCSV(text){
     const trienios=f[1]||'';
     const cuantia=pNum(f[2]||'');
     const percibio=pNum(f[3]||'');
-    const trieniosNum=parseInt(trienios.replace(/[^0-9]/g,''))||0;
-    const importe=trieniosNum*cuantia;
+    // La cuantía ya es el total del mes (mismo criterio que el informe final)
+    const importe=cuantia;
     const diferencia=importe-percibio;
     rows.push({mes,trienios:trienios.trim(),cuantia,percibio,importe,diferencia});
   }
@@ -1291,7 +1297,9 @@ function parseCSV(text){
   document.getElementById('csv-rows-count').textContent=rows.length+' periodos';
   document.getElementById('csv-table').style.display='table';
   document.getElementById('csv-empty').style.display='none';
-  document.getElementById('btn-selall-csv').style.display='inline-block';
+  const selallCsv=document.getElementById('btn-selall-csv');
+  selallCsv.style.display='inline-block';
+  selallCsv.textContent='Seleccionar todo';
 }
 
 function renderCSVTable(){
@@ -1411,11 +1419,11 @@ function buildReport(){
             style="width:52px;font-size:8.5pt;text-align:center" placeholder="Ej: 6B">
         </td>
         <td class="mono right">${fmt2(r.cuantia)} €</td>
-        <td class="mono right" style="padding:2px 5px">
+        <td class="mono right" style="padding:2px 5px;white-space:nowrap">
           <input type="text" class="csv-percibio pt-input right-input"
             value="${fmt2(r.percibio)}"
             style="width:70px;font-size:8.5pt"
-            oninput="recalcCSVRow(this)" placeholder="0,00">
+            oninput="recalcCSVRow(this)" placeholder="0,00"> €
         </td>
         <td class="mono right csv-dif" style="${dc}">${difTxt}</td>
       </tr>`;
@@ -1616,13 +1624,17 @@ function delPTRow(btn) {
 
 // ─── EXPORT WORD ──────────────────────────────────────────────────────────
 function exportWord() {
+  // Si se exporta desde la pantalla de selección, generar antes el informe
+  if (document.getElementById('view-selector').classList.contains('active')) buildReport();
+
   // Clone the doc node so we can sanitize it without touching the live DOM
   const docNode = document.getElementById('doc').cloneNode(true);
 
   // 1. Replace all inputs with their current value as plain text spans
+  //    (solo el valor real: los placeholders de ejemplo no se exportan)
   docNode.querySelectorAll('input[type=text], input[type=date]').forEach(inp => {
     const span = document.createElement('span');
-    span.textContent = inp.value || inp.placeholder || '';
+    span.textContent = inp.value || '';
     span.style.cssText = inp.style.cssText;
     inp.parentNode.replaceChild(span, inp);
   });
@@ -1707,6 +1719,11 @@ function exportWord() {
   const hoyStr = hoy.toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'});
   const el = document.getElementById('pagar-fecha-hoy');
   if (el) el.textContent = hoyStr;
+
+  // Evitar que soltar un archivo fuera de las zonas de carga
+  // haga que el navegador abra el archivo y se pierda todo
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', e => e.preventDefault());
 })();
 
 function fmt2(n){ return (n||0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2}); }
