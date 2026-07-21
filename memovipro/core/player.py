@@ -188,12 +188,17 @@ class Player:
             time.sleep(0.1)
 
     def _esperar_step(self) -> None:
-        """En modo step, espera a que advance_step() / abort() suelte el wait."""
+        """En modo step, espera a que advance_step()/continue_run()/abort()
+        suelte el wait.
+
+        NO se hace `clear()` al entrar: eso borraría una pulsación que el
+        usuario hiciera en respuesta al anuncio de la pausa (ventana entre
+        el `on_status` y el `wait`), colgando el loop hasta el timeout. El
+        descarte de pulsaciones PREVIAS a la pausa se hace en el loop, antes
+        de anunciarla. Aquí solo esperamos y consumimos."""
         if not self._step_mode:
             return
-        self._step_continue.clear()
-        # Timeout largo: 1h. Si en una hora no se ha pulsado "Siguiente"
-        # ni "Parar", asumimos abandono.
+        # Timeout largo: 1h. Si en una hora no se ha pulsado nada, abandono.
         self._step_continue.wait(timeout=3600.0)
         self._step_continue.clear()
 
@@ -255,6 +260,11 @@ class Player:
                 paso_render = render_step(paso, ctx)
                 es_bp = idx in self._breakpoints
                 debe_pausar = self._debe_pausar(idx)
+                if debe_pausar:
+                    # Descartar pulsaciones PREVIAS a la pausa (hechas durante
+                    # la ejecución del paso anterior). Las que lleguen tras el
+                    # anuncio de abajo sí cuentan y no se pierden.
+                    self._step_continue.clear()
                 if self._step_mode and self.on_status:
                     self.on_status(RunStatus(
                         dni=dni, paso_idx=idx,

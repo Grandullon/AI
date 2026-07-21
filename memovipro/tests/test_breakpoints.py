@@ -202,6 +202,47 @@ def test_loop_continue_para_en_breakpoint_y_ejecuta_resto(monkeypatch):
     assert pausas == [2, 4]
 
 
+# ==================== _esperar_step: sin lost-wakeup ====================
+
+def test_esperar_step_no_pierde_set_previo():
+    """Regresión: si el usuario pulsa (set) DESPUÉS de anunciarse la pausa
+    pero ANTES de que el loop entre al wait, _esperar_step no debe borrar
+    ese set (antes lo hacía con un clear() de entrada) ni colgarse."""
+    import time
+    from core.player import Player
+    p = _player_min()
+    p._step_continue.set()  # pulsación ya presente al entrar
+    inicio = time.time()
+    Player._esperar_step(p)   # NO debe bloquear ~3600s
+    assert time.time() - inicio < 1.0
+    assert not p._step_continue.is_set()  # se consumió (clear final)
+
+
+def test_esperar_step_bloquea_si_no_hay_set(monkeypatch):
+    """Sin set previo, espera (verificamos que llama a wait con timeout)."""
+    from core.player import Player
+    p = _player_min()
+    llam = {}
+    p._step_continue.wait = lambda timeout=None: llam.setdefault("t", timeout) or True
+    p._step_continue.clear = lambda: llam.__setitem__("cleared", True)
+    Player._esperar_step(p)
+    assert llam.get("t") == 3600.0
+    assert llam.get("cleared") is True
+
+
+def test_handlers_gated_en_pausa_por_inspeccion():
+    """Los handlers de avanzar/atrás/continuar/grabar comprueban _en_pausa."""
+    src = (ROOT / "ui" / "step_through_panel.py").read_text(encoding="utf-8")
+    for fn in ("_on_next", "_on_back", "_on_continue"):
+        cuerpo = src.split(f"def {fn}(self")[1].split("def ")[0]
+        assert "self._en_pausa" in cuerpo, f"{fn} no comprueba _en_pausa"
+    rec = src.split("def _on_record_here")[1].split("def ")[0]
+    assert "self._en_pausa" in rec
+    # El loop del player descarta pulsaciones previas a la pausa.
+    psrc = (ROOT / "core" / "player.py").read_text(encoding="utf-8")
+    assert "Descartar pulsaciones PREVIAS" in psrc
+
+
 # ==================== ajuste de breakpoints al editar ====================
 
 def test_shift_on_insert():

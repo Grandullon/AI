@@ -129,6 +129,10 @@ class StepThroughPanel(QWidget):
         # Con breakpoints arrancamos en modo "continue": auto-reproduce
         # hasta el primer punto. Sin breakpoints, paso a paso clásico.
         self._run_mode = "continue" if self._breakpoints else "step"
+        # ¿Estamos parados esperando al usuario? Grabar/avanzar/atrás solo
+        # tienen sentido en pausa (si no, se leería un step_index en
+        # movimiento y se mutaría macro.pasos a mitad de iteración).
+        self._en_pausa = not self._breakpoints  # sin bp: pausa desde el paso 1
 
         self.setObjectName("StepRoot")
         self.setWindowFlags(
@@ -199,6 +203,10 @@ class StepThroughPanel(QWidget):
         self.stop_btn.clicked.connect(self._on_stop)
         btns.addWidget(self.stop_btn)
         layout.addLayout(btns)
+        # Estado inicial: si arrancamos auto-reproduciendo (hay breakpoints),
+        # grabar/atrás/siguiente empiezan deshabilitados hasta la 1ª pausa.
+        for b in (self.back_btn, self.next_btn, self.record_btn):
+            b.setEnabled(self._en_pausa)
 
         # Atajos LOCALES de Qt (solo con MemoviPro enfocado). Los GLOBALES
         # (que funcionan con la app destino enfocada) se instalan con
@@ -244,7 +252,12 @@ class StepThroughPanel(QWidget):
 
     # ===== atajos globales (pynput) =====
     def _on_hotkey(self, nombre: str):
-        """Slot que corre en el hilo GUI (invocado por la señal _hotkey)."""
+        """Slot que corre en el hilo GUI (invocado por la señal _hotkey).
+
+        Ignora emisiones tardías: si el listener ya se paró (p. ej. durante
+        'grabar aquí'), una señal encolada no debe disparar nada."""
+        if self._kb_listener is None:
+            return
         {
             "next": self._on_next,
             "back": self._on_back,
@@ -290,6 +303,14 @@ class StepThroughPanel(QWidget):
             lst.stop()
         except Exception:
             pass
+        # Esperar a que el hilo del hook muera: si no, podría emitir una
+        # última señal ya con el listener a None (la ignora _on_hotkey, pero
+        # así cerramos la ventana del todo, igual que RecordDialog).
+        try:
+            if lst.is_alive():
+                lst.join(timeout=1.0)
+        except Exception:
+            pass
 
     # ===== drag =====
     def mousePressEvent(self, event):
@@ -306,9 +327,17 @@ class StepThroughPanel(QWidget):
         self._drag_offset = None
 
     # ===== callbacks =====
+    def _set_controls_en_pausa(self, en_pausa: bool):
+        """Habilita grabar/atrás/siguiente solo cuando estamos parados.
+        Continuar y parar están siempre disponibles."""
+        self._en_pausa = en_pausa
+        for b in (self.back_btn, self.next_btn, self.record_btn):
+            b.setEnabled(en_pausa)
+
     def _on_step_status(self, status: RunStatus):
         n = status.paso_idx + 1
         total = len(self.macro.pasos)
+        self._set_controls_en_pausa(status.en_pausa)
         if status.en_pausa:
             estado = "punto de análisis" if status.es_breakpoint else "pausa"
             self.subtitle_label.setText(f"Paso {n}/{total} · {estado}")
@@ -335,13 +364,15 @@ class StepThroughPanel(QWidget):
                 pass
 
     def _on_next(self):
-        if self._runner is None:
+        # Solo con el loop parado: avanzar mientras auto-reproduce no tiene
+        # sentido y leería un estado en movimiento.
+        if self._runner is None or not self._en_pausa:
             return
         self._runner.advance_step()
 
     def _on_continue(self):
         """Reanuda hasta el siguiente punto de análisis (o el final)."""
-        if self._runner is None:
+        if self._runner is None or not self._en_pausa:
             return
         self.bp_label.setVisible(False)
         self._runner.continue_run()
@@ -351,7 +382,7 @@ class StepThroughPanel(QWidget):
 
         No deshace lo ya hecho en la aplicación, solo re-apunta al paso
         anterior; el siguiente ▶ lo volverá a ejecutar."""
-        if self._runner is None:
+        if self._runner is None or not self._en_pausa:
             return
         self._runner.step_back()
 
@@ -365,6 +396,10 @@ class StepThroughPanel(QWidget):
         capturados se insertan en la macro JUSTO DESPUÉS del paso actual."""
         if self._runner is None or self._runner.player is None:
             QMessageBox.information(self, "Aún no", "Pulsa primero ▶ Siguiente al menos una vez.")
+            return
+        if not self._en_pausa:
+            # Solo se puede insertar con el loop parado: si no, step_index()
+            # se mueve y mutaríamos macro.pasos a mitad de iteración.
             return
         idx_actual = self._runner.player.step_index()
 
