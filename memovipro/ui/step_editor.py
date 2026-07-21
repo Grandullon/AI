@@ -57,6 +57,10 @@ class StepEditor(QWidget):
         # perdían y no iban al data/ real de la app.
         self.data_dir = self.macros_dir.parent / "data"
         self.macro: Macro = Macro(nombre="nueva_macro")
+        # Puntos de análisis (breakpoints): índices 0-based de pasos donde
+        # el paso a paso debe detenerse. No se guardan en el YAML; son una
+        # ayuda de depuración de la sesión.
+        self._breakpoints: set[int] = set()
 
         layout = QVBoxLayout(self)
 
@@ -100,6 +104,7 @@ class StepEditor(QWidget):
             ("Bajar", lambda: self._move(1), None),
             ("Inspector", self._launch_inspector, None),
             ("⚡ Plantilla arranque", self._insertar_plantilla_arranque, "#8e44ad"),
+            ("🔴 Punto análisis", self._toggle_breakpoint, "#7f2d2d"),
             ("🐞 Paso a paso", self._launch_step_through, "#16a085"),
             ("▶ Hasta aquí", self._run_hasta_aqui, "#2980b9"),
             ("▶ Desde aquí", self._run_desde_aqui, "#2980b9"),
@@ -134,8 +139,10 @@ class StepEditor(QWidget):
             desc = paso.descripcion
             if paso.verificar_ventana:
                 desc = f"{desc}  ✓verifica:'{paso.verificar_ventana}'"
+            # Marca ● roja en la columna # si el paso es punto de análisis.
+            num_txt = f"🔴 {i + 1}" if i in self._breakpoints else str(i + 1)
             valores = [
-                str(i + 1),
+                num_txt,
                 paso.tipo.value,
                 sel_txt,
                 valor,
@@ -236,6 +243,8 @@ class StepEditor(QWidget):
         row = self.tabla.currentRow()
         insert_at = (row + 1) if row >= 0 else len(self.macro.pasos)
         self.macro.pasos.insert(insert_at, nuevo)
+        from core.debug_marks import shift_on_insert
+        self._breakpoints = shift_on_insert(self._breakpoints, insert_at, 1)
         self._refresh_table()
         # Dejar seleccionado el paso recién creado y, si su tipo necesita un
         # valor, abrir el editor en el acto para no tener que pulsar
@@ -390,6 +399,8 @@ class StepEditor(QWidget):
         if row < 0:
             return
         del self.macro.pasos[row]
+        from core.debug_marks import shift_on_remove
+        self._breakpoints = shift_on_remove(self._breakpoints, row)
         self._refresh_table()
 
     def _move(self, delta: int):
@@ -400,6 +411,8 @@ class StepEditor(QWidget):
         if not 0 <= new < len(self.macro.pasos):
             return
         self.macro.pasos[row], self.macro.pasos[new] = self.macro.pasos[new], self.macro.pasos[row]
+        from core.debug_marks import swap_on_move
+        self._breakpoints = swap_on_move(self._breakpoints, row, new)
         self._refresh_table()
         self.tabla.selectRow(new)
 
@@ -418,6 +431,7 @@ class StepEditor(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "Error", f"No se pudo cargar: {exc}")
             return
+        self._breakpoints = set()  # los breakpoints eran de la macro anterior
         self._sync_to_form()
         self._refresh_table()
 
@@ -463,6 +477,30 @@ class StepEditor(QWidget):
         elif result == QDialog.DialogCode.Accepted:
             QMessageBox.information(self, "Grabación", "No se capturó ningún paso.")
 
+    def _toggle_breakpoint(self):
+        """Marca/desmarca el paso seleccionado como punto de análisis."""
+        row = self.tabla.currentRow()
+        if row < 0:
+            QMessageBox.information(
+                self, "Selecciona un paso",
+                "Pincha la fila donde quieres poner (o quitar) el punto de análisis.",
+            )
+            return
+        if row in self._breakpoints:
+            self._breakpoints.discard(row)
+        else:
+            self._breakpoints.add(row)
+        self._refresh_table()
+        self.tabla.selectRow(row)
+
+    def _on_step_through_macro_modified(self):
+        """El step-through insertó pasos: sincronizamos los breakpoints
+        (que el panel ha desplazado) de vuelta al editor y refrescamos."""
+        panel = getattr(self, "_step_panel", None)
+        if panel is not None:
+            self._breakpoints = set(getattr(panel, "_breakpoints", self._breakpoints))
+        self._refresh_table()
+
     def _launch_step_through(self):
         """Lanza el depurador paso a paso (step-through) sobre la macro.
 
@@ -480,13 +518,16 @@ class StepEditor(QWidget):
         screenshots_dir = data_dir / "screenshots"
         screenshots_dir.mkdir(parents=True, exist_ok=True)
 
+        # Solo breakpoints dentro del rango actual de pasos.
+        bps = {b for b in self._breakpoints if 0 <= b < len(self.macro.pasos)}
         from .step_through_panel import StepThroughPanel
         self._step_panel = StepThroughPanel(
             macro=self.macro,
             screenshots_dir=screenshots_dir,
             data_dir=data_dir,
-            on_macro_modified=self._refresh_table,
+            on_macro_modified=self._on_step_through_macro_modified,
             on_step_changed=self.highlight_step,
+            breakpoints=bps,
             parent=self,
         )
         self._step_panel.finished.connect(self._on_step_through_finished)

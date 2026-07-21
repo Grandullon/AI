@@ -37,6 +37,8 @@ class RunStatus:
     dni: str
     paso_idx: int
     descripcion: str
+    es_breakpoint: bool = False   # el paso actual es un punto de análisis
+    en_pausa: bool = False        # el loop se ha detenido esperando al usuario
 
 
 class Player:
@@ -59,6 +61,8 @@ class Player:
         step_mode: bool = False,
         start_idx: int = 0,
         stop_after_idx: int | None = None,
+        breakpoints: set[int] | None = None,
+        run_mode: str = "step",
     ):
         self.macro = macro
         self.screenshots_dir = Path(screenshots_dir)
@@ -103,6 +107,14 @@ class Player:
         # paso (para revisar / reejecutar). Lo activa step_back() y lo
         # consume el loop tras despertar de _esperar_step().
         self._step_back_flag: bool = False
+        # Puntos de análisis (breakpoints, 0-based) y modo de ejecución
+        # dentro del step-through:
+        #   - "step": pausa ANTES de cada paso (paso a paso clásico).
+        #   - "continue": corre sin pausar hasta llegar a un breakpoint.
+        # Al alcanzar un breakpoint en modo "continue" se pausa y el
+        # usuario decide (avanzar 1, continuar al siguiente, grabar).
+        self._breakpoints: set[int] = {int(b) for b in (breakpoints or set())}
+        self._run_mode: str = run_mode if run_mode in ("step", "continue") else "step"
 
     def abort(self) -> None:
         self._abort.set()
@@ -125,7 +137,16 @@ class Player:
         return self._paused.is_set()
 
     def advance_step(self) -> None:
-        """En modo step-through, indica al loop que avance al siguiente paso."""
+        """Avanza UN paso y vuelve a pausar (modo paso a paso)."""
+        self._run_mode = "step"
+        self._step_back_flag = False
+        self._step_continue.set()
+
+    def continue_run(self) -> None:
+        """Reanuda la ejecución hasta el SIGUIENTE punto de análisis
+        (breakpoint) o el final. Si no hay más breakpoints, termina la
+        macro sin más pausas."""
+        self._run_mode = "continue"
         self._step_back_flag = False
         self._step_continue.set()
 
@@ -136,8 +157,26 @@ class Player:
         UI), pero re-apunta al paso anterior para poder revisarlo o
         reejecutarlo con el siguiente ▶. Despierta el wait igual que
         advance_step(), marcando la intención de retroceder."""
+        self._run_mode = "step"
         self._step_back_flag = True
         self._step_continue.set()
+
+    def set_breakpoints(self, breakpoints) -> None:
+        """Actualiza el conjunto de puntos de análisis en caliente."""
+        self._breakpoints = {int(b) for b in (breakpoints or set())}
+
+    def _debe_pausar(self, idx: int) -> bool:
+        """¿El loop debe detenerse ANTES del paso `idx`?
+
+        - Fuera de step_mode: nunca.
+        - En modo "step": siempre (paso a paso).
+        - En modo "continue": solo si `idx` es un punto de análisis.
+        """
+        if not self._step_mode:
+            return False
+        if self._run_mode == "step":
+            return True
+        return idx in self._breakpoints
 
     def step_index(self) -> int:
         """Índice del paso actualmente apuntado (0-based)."""
@@ -214,18 +253,28 @@ class Player:
                 # Notificamos ANTES del wait para que la UI pueda mostrar
                 # qué paso está a punto de ejecutarse.
                 paso_render = render_step(paso, ctx)
+                es_bp = idx in self._breakpoints
+                debe_pausar = self._debe_pausar(idx)
                 if self._step_mode and self.on_status:
-                    self.on_status(RunStatus(dni=dni, paso_idx=idx, descripcion=paso_render.descripcion or paso_render.tipo.value))
-                self._esperar_step()
-                if self._abort.is_set():
-                    break
-                # Step-back: el usuario pidió retroceder. Re-apuntamos al
-                # paso anterior (sin ejecutar el actual) y volvemos a
-                # esperar; la UI mostrará el paso previo resaltado.
-                if self._step_mode and self._step_back_flag:
-                    self._step_back_flag = False
-                    self._step_idx = max(self._start_idx, idx - 1)
-                    continue
+                    self.on_status(RunStatus(
+                        dni=dni, paso_idx=idx,
+                        descripcion=paso_render.descripcion or paso_render.tipo.value,
+                        es_breakpoint=es_bp, en_pausa=debe_pausar,
+                    ))
+                # Solo esperamos si toca pausar (modo step, o breakpoint en
+                # modo continue). En modo continue entre breakpoints el loop
+                # NO se bloquea: auto-reproduce hasta el siguiente punto.
+                if debe_pausar:
+                    self._esperar_step()
+                    if self._abort.is_set():
+                        break
+                    # Step-back: el usuario pidió retroceder. Re-apuntamos al
+                    # paso anterior (sin ejecutar el actual) y volvemos a
+                    # esperar; la UI mostrará el paso previo resaltado.
+                    if self._step_back_flag:
+                        self._step_back_flag = False
+                        self._step_idx = max(self._start_idx, idx - 1)
+                        continue
                 # Control de flujo: IF_VENTANA decide cuántos pasos avanzar
                 # (ejecutar el bloque "then" o saltarlo). No es una acción
                 # de UI, así que se resuelve aquí y saltamos el resto.

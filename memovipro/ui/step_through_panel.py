@@ -1,10 +1,16 @@
 """Step-through debugger flotante para la pestaña Macros.
 
-Permite ejecutar una macro paso a paso, mostrando el paso actual y
-esperando a que el usuario pulse "▶ Siguiente" (o Espacio/F10) para
-avanzar. En cualquier momento puede pulsar "🔴 Grabar pasos aquí" para
-insertar nuevos pasos en la macro en la posición actual, y luego
-seguir reproduciendo. Es lo que UiPath llama "step into".
+Permite ejecutar una macro paso a paso, o con PUNTOS DE ANÁLISIS
+(breakpoints): se auto-reproduce hasta el siguiente punto y ahí para.
+En cada parada se puede grabar un paso nuevo en medio, avanzar paso a
+paso, o saltar al siguiente punto.
+
+Atajos GLOBALES (funcionan aunque el foco esté en la app que se
+automatiza, no solo con MemoviPro enfocado):
+    F8 = siguiente · F7 = atrás · F6 = continuar (al siguiente punto)
+    F9 = parar
+Además, con MemoviPro enfocado, valen Espacio/F10/→ (siguiente),
+← (atrás) y Esc (parar).
 
 Reutiliza el patrón de ControlWindow (frameless, always on top, drag a
 corner). Pone MemoviPro minimizado durante la sesión y lo restaura al
@@ -25,6 +31,12 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+try:
+    from pynput import keyboard as _pynput_keyboard
+    _HAS_PYNPUT = True
+except Exception:
+    _HAS_PYNPUT = False
 
 from core.player import RunStatus
 from core.recorder import Recorder
@@ -58,6 +70,9 @@ QPushButton#record { background-color: #e67e22; border-color: #ba6411; }
 QPushButton#record:hover { background-color: #f39c12; }
 QPushButton#back { background-color: #2c3e50; border-color: #1a252f; }
 QPushButton#back:hover { background-color: #34495e; }
+QPushButton#cont { background-color: #2980b9; border-color: #1f618d; font-weight: bold; }
+QPushButton#cont:hover { background-color: #3498db; }
+QLabel#bp { color: #f1c40f; font-size: 11px; font-weight: bold; }
 """
 
 
@@ -87,6 +102,11 @@ class StepThroughPanel(QWidget):
     # Señal emitida cuando el panel termina (para que el editor restaure
     # la ventana principal y refresque la tabla).
     finished = pyqtSignal()
+    # Señal interna para marshalar las teclas globales (pynput) al hilo
+    # GUI. QTimer.singleShot desde el hilo de pynput NO sirve: crearía el
+    # timer en un hilo sin event loop de Qt y nunca dispararía. Emitir una
+    # señal es thread-safe y se encola al hilo del objeto (el GUI).
+    _hotkey = pyqtSignal(str)
 
     def __init__(
         self,
@@ -95,6 +115,7 @@ class StepThroughPanel(QWidget):
         data_dir: Path,
         on_macro_modified: Callable[[], None] | None = None,
         on_step_changed: Callable[[int], None] | None = None,
+        breakpoints: set[int] | None = None,
         parent=None,
     ):
         super().__init__(parent=None)  # top-level
@@ -103,6 +124,11 @@ class StepThroughPanel(QWidget):
         self.data_dir = data_dir
         self.on_macro_modified = on_macro_modified
         self.on_step_changed = on_step_changed
+        self._breakpoints = {int(b) for b in (breakpoints or set())}
+        self._kb_listener = None
+        # Con breakpoints arrancamos en modo "continue": auto-reproduce
+        # hasta el primer punto. Sin breakpoints, paso a paso clásico.
+        self._run_mode = "continue" if self._breakpoints else "step"
 
         self.setObjectName("StepRoot")
         self.setWindowFlags(
@@ -122,14 +148,27 @@ class StepThroughPanel(QWidget):
         self.title_label.setObjectName("title")
         layout.addWidget(self.title_label)
 
-        self.subtitle_label = QLabel(f"Paso 0/{len(macro.pasos)}")
+        n_bp = len(self._breakpoints)
+        sub = f"Paso 0/{len(macro.pasos)}"
+        if n_bp:
+            sub += f"  ·  {n_bp} punto(s) de análisis"
+        self.subtitle_label = QLabel(sub)
         self.subtitle_label.setObjectName("subtitle")
         layout.addWidget(self.subtitle_label)
 
-        self.action_label = QLabel(
-            "Pulsa <b>▶</b> o <b>→</b> para avanzar · <b>◀</b> o <b>←</b> "
-            "para retroceder."
-        )
+        # Etiqueta destacada cuando paramos en un punto de análisis.
+        self.bp_label = QLabel("")
+        self.bp_label.setObjectName("bp")
+        self.bp_label.setVisible(False)
+        layout.addWidget(self.bp_label)
+
+        if n_bp:
+            ayuda = ("Reproduciendo hasta el primer punto…  "
+                     "<b>F8</b> paso · <b>F6</b> continuar · <b>F9</b> parar")
+        else:
+            ayuda = ("<b>F8</b>/→ avanzar · <b>F7</b>/← atrás · "
+                     "<b>F6</b> continuar · <b>F9</b> parar  (teclas globales)")
+        self.action_label = QLabel(ayuda)
         self.action_label.setObjectName("action")
         self.action_label.setWordWrap(True)
         self.action_label.setTextFormat(Qt.TextFormat.RichText)
@@ -138,35 +177,36 @@ class StepThroughPanel(QWidget):
         btns = QHBoxLayout()
         btns.setContentsMargins(0, 6, 0, 0)
         btns.setSpacing(6)
-        self.back_btn = QPushButton("◀ Atrás")
+        self.back_btn = QPushButton("◀ F7")
         self.back_btn.setObjectName("back")
         self.back_btn.clicked.connect(self._on_back)
         btns.addWidget(self.back_btn)
-        self.next_btn = QPushButton("▶ Siguiente")
+        self.next_btn = QPushButton("▶ F8")
         self.next_btn.setObjectName("next")
         self.next_btn.clicked.connect(self._on_next)
         btns.addWidget(self.next_btn)
-        self.record_btn = QPushButton("🔴 Grabar aquí")
+        self.cont_btn = QPushButton("▶▶ F6")
+        self.cont_btn.setObjectName("cont")
+        self.cont_btn.setToolTip("Continuar hasta el siguiente punto de análisis")
+        self.cont_btn.clicked.connect(self._on_continue)
+        btns.addWidget(self.cont_btn)
+        self.record_btn = QPushButton("🔴 Grabar")
         self.record_btn.setObjectName("record")
         self.record_btn.clicked.connect(self._on_record_here)
         btns.addWidget(self.record_btn)
-        self.stop_btn = QPushButton("⏹")
+        self.stop_btn = QPushButton("⏹ F9")
         self.stop_btn.setObjectName("stop")
         self.stop_btn.clicked.connect(self._on_stop)
         btns.addWidget(self.stop_btn)
         layout.addLayout(btns)
 
-        # Atajos teclado:
-        #   Espacio / F10 / → (flecha derecha) = Siguiente
-        #   ← (flecha izquierda) = Atrás
-        #   Esc = Parar
+        # Atajos LOCALES de Qt (solo con MemoviPro enfocado). Los GLOBALES
+        # (que funcionan con la app destino enfocada) se instalan con
+        # pynput en _start_hotkeys().
         for key in ("Space", "F10", "Right"):
-            sc = QShortcut(QKeySequence(key), self)
-            sc.activated.connect(self._on_next)
-        sc_back = QShortcut(QKeySequence("Left"), self)
-        sc_back.activated.connect(self._on_back)
-        sc_esc = QShortcut(QKeySequence("Escape"), self)
-        sc_esc.activated.connect(self._on_stop)
+            QShortcut(QKeySequence(key), self).activated.connect(self._on_next)
+        QShortcut(QKeySequence("Left"), self).activated.connect(self._on_back)
+        QShortcut(QKeySequence("Escape"), self).activated.connect(self._on_stop)
 
         self.adjustSize()
 
@@ -179,11 +219,16 @@ class StepThroughPanel(QWidget):
             data_dir=data_dir,
             watchdog_activo=False,  # paso a paso no necesita auto-cierre de popups
             step_mode=True,
+            breakpoints=self._breakpoints,
+            run_mode=self._run_mode,
         )
         self._thread = _StepThroughThread(self._runner)
         self._thread.step_status.connect(self._on_step_status)
         self._thread.finished_summary.connect(self._on_finished)
         self._thread.error.connect(self._on_error)
+        # Las teclas globales (pynput, otro hilo) llegan por esta señal, que
+        # Qt encola al hilo GUI.
+        self._hotkey.connect(self._on_hotkey)
 
     def show_in_corner(self):
         scr = self.screen().availableGeometry() if self.screen() else None
@@ -194,7 +239,57 @@ class StepThroughPanel(QWidget):
 
     def start(self):
         self.show_in_corner()
+        self._start_hotkeys()
         self._thread.start()
+
+    # ===== atajos globales (pynput) =====
+    def _on_hotkey(self, nombre: str):
+        """Slot que corre en el hilo GUI (invocado por la señal _hotkey)."""
+        {
+            "next": self._on_next,
+            "back": self._on_back,
+            "continue": self._on_continue,
+            "stop": self._on_stop,
+        }.get(nombre, lambda: None)()
+
+    def _start_hotkeys(self):
+        """Instala teclas globales F6/F7/F8/F9 que funcionan aunque el foco
+        esté en la app que se automatiza (los QShortcut de Qt solo valen
+        con MemoviPro enfocado, por eso antes obligaban al ratón)."""
+        if not _HAS_PYNPUT:
+            return
+        if self._kb_listener is not None:
+            return  # ya instalado
+
+        # Mapa tecla → nombre de acción. El callback corre en el hilo de
+        # pynput; emite la señal (thread-safe) que se ejecuta en el GUI.
+        acciones = {
+            _pynput_keyboard.Key.f8: "next",
+            _pynput_keyboard.Key.f7: "back",
+            _pynput_keyboard.Key.f6: "continue",
+            _pynput_keyboard.Key.f9: "stop",
+        }
+
+        def on_press(key):
+            nombre = acciones.get(key)
+            if nombre is not None:
+                self._hotkey.emit(nombre)
+
+        try:
+            self._kb_listener = _pynput_keyboard.Listener(on_press=on_press)
+            self._kb_listener.start()
+        except Exception:
+            self._kb_listener = None
+
+    def _stop_hotkeys(self):
+        lst = self._kb_listener
+        self._kb_listener = None
+        if lst is None:
+            return
+        try:
+            lst.stop()
+        except Exception:
+            pass
 
     # ===== drag =====
     def mousePressEvent(self, event):
@@ -214,7 +309,20 @@ class StepThroughPanel(QWidget):
     def _on_step_status(self, status: RunStatus):
         n = status.paso_idx + 1
         total = len(self.macro.pasos)
-        self.subtitle_label.setText(f"Paso {n}/{total} (próximo)")
+        if status.en_pausa:
+            estado = "punto de análisis" if status.es_breakpoint else "pausa"
+            self.subtitle_label.setText(f"Paso {n}/{total} · {estado}")
+        else:
+            self.subtitle_label.setText(f"Paso {n}/{total} · reproduciendo…")
+        # Aviso destacado al parar en un punto de análisis.
+        if status.es_breakpoint and status.en_pausa:
+            self.bp_label.setText(
+                f"⏸ Punto de análisis en el paso {n}. "
+                "F8 paso · F6 siguiente punto · 🔴 grabar aquí."
+            )
+            self.bp_label.setVisible(True)
+        else:
+            self.bp_label.setVisible(False)
         self.action_label.setText(
             f"<b>{n}.</b> {status.descripcion or '(sin descripción)'}"
         )
@@ -230,6 +338,13 @@ class StepThroughPanel(QWidget):
         if self._runner is None:
             return
         self._runner.advance_step()
+
+    def _on_continue(self):
+        """Reanuda hasta el siguiente punto de análisis (o el final)."""
+        if self._runner is None:
+            return
+        self.bp_label.setVisible(False)
+        self._runner.continue_run()
 
     def _on_back(self):
         """Retrocede el puntero un paso (para revisar / reejecutar).
@@ -253,6 +368,10 @@ class StepThroughPanel(QWidget):
             return
         idx_actual = self._runner.player.step_index()
 
+        # Detener nuestras teclas globales mientras se graba: si no, F6-F8
+        # dispararían acciones del step-through en vez de capturarse.
+        self._stop_hotkeys()
+
         # Lanzamos el RecordDialog modal. El step-through se queda
         # esperando porque _runner.player no recibe advance_step.
         dlg = RecordDialog(parent=self)
@@ -261,26 +380,39 @@ class StepThroughPanel(QWidget):
             nuevos = list(dlg.macro.pasos)
             insert_at = idx_actual + 1
             self.macro.pasos[insert_at:insert_at] = nuevos
+            # Desplazar los breakpoints que estaban en/tras el punto de
+            # inserción: sus índices se corren `len(nuevos)` posiciones.
+            from core.debug_marks import shift_on_insert
+            self._breakpoints = shift_on_insert(self._breakpoints, insert_at, len(nuevos))
+            if self._runner and self._runner.player:
+                self._runner.player.set_breakpoints(self._breakpoints)
             if self.on_macro_modified:
                 self.on_macro_modified()
             self.action_label.setText(
                 f"<b>{insert_at + 1}.</b> ➕ Insertados {len(nuevos)} pasos "
-                "nuevos justo después del paso actual. Pulsa ▶ Siguiente."
+                "nuevos justo después del paso actual. Pulsa F8/▶."
             )
+        # Reanudar las teclas globales tras la grabación.
+        self._start_hotkeys()
 
     def _on_finished(self, summary: ReplaySummary):
         self.action_label.setText(
             f"<b>✓ Fin</b> · {summary.ok} OK · {summary.ko} KO"
         )
         self.next_btn.setEnabled(False)
+        self.cont_btn.setEnabled(False)
         self.record_btn.setEnabled(False)
+        self.bp_label.setVisible(False)
+        self._stop_hotkeys()
         self.finished.emit()
 
     def _on_error(self, msg: str):
         self.action_label.setText(f"<span style='color:#e74c3c'>❌ {msg}</span>")
+        self._stop_hotkeys()
         self.finished.emit()
 
     def closeEvent(self, event):
+        self._stop_hotkeys()
         if self._runner:
             self._runner.abort()
         if self._thread and self._thread.isRunning():

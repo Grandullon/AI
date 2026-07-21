@@ -51,6 +51,8 @@ class ReplayRunner:
         step_mode: bool = False,
         start_idx: int = 0,
         stop_after_idx: int | None = None,
+        breakpoints: set[int] | None = None,
+        run_mode: str = "step",
     ):
         self.macro = macro
         self.veces = max(1, int(veces))
@@ -67,6 +69,8 @@ class ReplayRunner:
         self.step_mode = bool(step_mode)
         self.start_idx = int(start_idx)
         self.stop_after_idx = stop_after_idx
+        self.breakpoints = set(breakpoints or set())
+        self.run_mode = run_mode
         self._abort = threading.Event()
         self._player: Player | None = None
 
@@ -87,6 +91,11 @@ class ReplayRunner:
         """En modo step-through, indica al player que avance al siguiente paso."""
         if self._player:
             self._player.advance_step()
+
+    def continue_run(self) -> None:
+        """Reanuda hasta el siguiente punto de análisis (o el final)."""
+        if self._player:
+            self._player.continue_run()
 
     def step_back(self) -> None:
         """En modo step-through, retrocede el puntero un paso."""
@@ -123,6 +132,8 @@ class ReplayRunner:
                 step_mode=self.step_mode,
                 start_idx=self.start_idx,
                 stop_after_idx=self.stop_after_idx,
+                breakpoints=self.breakpoints,
+                run_mode=self.run_mode,
             )
             try:
                 exito, incidencias = self._player.ejecutar_dni(ctx)
