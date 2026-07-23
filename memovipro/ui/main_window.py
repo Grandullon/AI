@@ -138,8 +138,13 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentWidget(self.incidents_view)
 
     def _abortar_todo(self):
-        """Aborta cualquier ejecución en marcha en todos los paneles."""
-        for panel in (self.run_panel, self.replay_panel, self.pipeline_panel):
+        """Aborta cualquier ejecución en marcha en todos los paneles.
+
+        Incluye el editor de Macros (StepEditor), cuyos hilos de "▶ Hasta
+        aquí/Desde aquí" y "paso a paso" tienen otros nombres y antes se
+        quedaban fuera del cierre limpio y de la tecla de pánico."""
+        for panel in (self.run_panel, self.replay_panel,
+                      self.pipeline_panel, self.step_editor):
             try:
                 panel.abort()
             except Exception:
@@ -159,6 +164,12 @@ class MainWindow(QMainWindow):
             th = getattr(panel, "_thread", None)
             if th is not None and th.isRunning():
                 hilos.append(th)
+        # El editor de Macros tiene hilos con otros nombres (rango, paso a
+        # paso); los expone por su propio método.
+        try:
+            hilos.extend(self.step_editor.hilos_en_marcha())
+        except Exception:
+            pass
         return hilos
 
     def _detener_hilos(self, hilos) -> None:

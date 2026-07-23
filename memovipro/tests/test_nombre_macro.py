@@ -69,6 +69,49 @@ def test_dos_macros_grabadas_no_colapsan(tmp_path):
     assert destinos == {"PRUEBAIT.yaml", "huelga.yaml"}
 
 
+def test_nombre_archivo_solo_puntos_o_invalidos():
+    assert nombre_archivo_macro("///") == "macro_sin_nombre.yaml"
+    assert nombre_archivo_macro(".") == "macro_sin_nombre.yaml"
+    assert nombre_archivo_macro("..") == "macro_sin_nombre.yaml"
+
+
+def test_nombre_archivo_reservados_windows():
+    assert nombre_archivo_macro("CON") == "CON_.yaml"
+    assert nombre_archivo_macro("nul") == "nul_.yaml"
+    assert nombre_archivo_macro("com1") == "com1_.yaml"
+    # No reservado si lleva algo más.
+    assert nombre_archivo_macro("console") == "console.yaml"
+
+
+def test_nombre_archivo_acota_longitud():
+    largo = "a" * 300
+    out = nombre_archivo_macro(largo)
+    stem = out[:-5]  # sin .yaml
+    assert len(stem) <= 100
+    assert out.endswith(".yaml")
+
+
+def test_nombre_archivo_extension_no_cuenta_para_el_tope():
+    out = nombre_archivo_macro("informe.yml")
+    assert out == "informe.yml"
+
+
+def test_editor_reset_highlight_al_cargar_y_reemplazar():
+    """Inspección: _load y la rama de reemplazo limpian _highlighted_row
+    para no arrastrar el resaltado amarillo entre macros."""
+    src = (ROOT / "ui" / "step_editor.py").read_text(encoding="utf-8")
+    load_fn = src.split("def _load(self)")[1].split("def _save")[0]
+    assert "_highlighted_row = -1" in load_fn
+
+
+def test_mainwindow_incluye_editor_en_cierre_y_panic():
+    src = (ROOT / "ui" / "main_window.py").read_text(encoding="utf-8")
+    ab = src.split("def _abortar_todo")[1].split("def ")[0]
+    assert "self.step_editor" in ab
+    hil = src.split("def _hilos_en_marcha")[1].split("def ")[0]
+    assert "self.step_editor.hilos_en_marcha()" in hil
+
+
 def test_editor_load_usa_nombre_del_archivo():
     """Inspección: _load fija macro.nombre = Path(path).stem y _save usa
     nombre_archivo_macro."""

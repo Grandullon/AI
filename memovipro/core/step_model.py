@@ -184,22 +184,53 @@ class Macro:
         return hashlib.sha256(blob).hexdigest()[:16]
 
 
+# Nombres de fichero reservados en Windows (sin extensión, case-insensitive):
+# crearlos falla aunque sean "válidos" como texto.
+_NOMBRES_RESERVADOS_WIN = {
+    "con", "prn", "aux", "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
+_MAX_STEM = 100  # tope de longitud del nombre (sin extensión)
+
+
 def nombre_archivo_macro(nombre: str) -> str:
     """Convierte el nombre de una macro en un nombre de archivo YAML válido.
 
-    Sanitiza caracteres no válidos y garantiza la extensión .yaml. Fuente
-    única de verdad para el guardado (evita que el editor y otros sitios
-    sanitizen de forma distinta).
+    Sanitiza caracteres no válidos, evita nombres reservados de Windows,
+    acota la longitud y garantiza la extensión .yaml. Fuente única de
+    verdad para el guardado (evita que el editor y otros sitios sanitizen
+    de forma distinta).
 
         "Rutina Diaria" → "Rutina_Diaria.yaml"
         "informe.yml"   → "informe.yml"   (respeta .yml existente)
         ""              → "macro_sin_nombre.yaml"
+        "///"           → "macro_sin_nombre.yaml"
+        "CON"           → "CON_.yaml"      (reservado Windows)
     """
     base = (nombre or "").strip() or "macro_sin_nombre"
+    # Separar una extensión .yaml/.yml explícita para no contarla en el tope
+    # ni sanitizar su punto.
+    ext = ".yaml"
+    low = base.lower()
+    if low.endswith(".yaml"):
+        base, ext = base[:-5], ".yaml"
+    elif low.endswith(".yml"):
+        base, ext = base[:-4], ".yml"
+    # Sanitizar el cuerpo.
     base = "".join(c if c.isalnum() or c in "-_." else "_" for c in base)
-    if not base.endswith((".yaml", ".yml")):
-        base = f"{base}.yaml"
-    return base
+    # Quitar puntos/espacios sobrantes en los extremos (".", "..", " x ").
+    base = base.strip(". ")
+    # Si no queda nada con sentido (vacío o solo "_"/"-"/"."), usar defecto.
+    if not base or not any(c.isalnum() for c in base):
+        base = "macro_sin_nombre"
+    # Acotar longitud.
+    if len(base) > _MAX_STEM:
+        base = base[:_MAX_STEM].rstrip("_. ") or "macro"
+    # Evitar nombres reservados de Windows.
+    if base.lower() in _NOMBRES_RESERVADOS_WIN:
+        base = f"{base}_"
+    return f"{base}{ext}"
 
 
 _PLACEHOLDER_RE = re.compile(r"\{([A-Z_][A-Z0-9_]*)\}")

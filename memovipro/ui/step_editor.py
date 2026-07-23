@@ -443,6 +443,7 @@ class StepEditor(QWidget):
         self.macro.nombre = Path(path).stem
         self._loaded_path = Path(path)
         self._breakpoints = set()  # los breakpoints eran de la macro anterior
+        self._highlighted_row = -1  # sin highlight fantasma de la macro previa
         self._sync_to_form()
         self._refresh_table()
 
@@ -476,6 +477,12 @@ class StepEditor(QWidget):
             )
             if resp != QMessageBox.StandardButton.Yes:
                 return
+        # ¿Es un "guardar como" (renombrado)? El fichero anterior se conserva.
+        prev = getattr(self, "_loaded_path", None)
+        es_renombrado = (
+            prev is not None and prev.exists()
+            and prev.resolve() != path.resolve()
+        )
         try:
             self.macro.save(path)
         except Exception as exc:
@@ -484,7 +491,11 @@ class StepEditor(QWidget):
         # A partir de ahora, este es el fichero "en curso": guardar de nuevo
         # (mismo nombre) irá aquí sin volver a preguntar.
         self._loaded_path = path
-        QMessageBox.information(self, "Guardado", f"Macro guardada en:\n{path}")
+        msg = f"Macro guardada en:\n{path}"
+        if es_renombrado:
+            msg += (f"\n\nEl fichero anterior '{prev.name}' se conserva "
+                    "(no se ha borrado).")
+        QMessageBox.information(self, "Guardado", msg)
 
     def _launch_recorder(self):
         from PyQt6.QtWidgets import QDialog
@@ -530,6 +541,9 @@ class StepEditor(QWidget):
         self._sync_from_form()
         if not self.macro.pasos:
             QMessageBox.warning(self, "Macro vacía", "Añade o graba pasos antes de usar paso a paso.")
+            return
+        if self._ejecucion_en_curso():
+            QMessageBox.information(self, "En ejecución", "Ya hay una ejecución en curso.")
             return
         # Dirs de runtime: data/ real de la app (no _MEIPASS en el .exe).
         data_dir = self.data_dir
@@ -602,9 +616,10 @@ class StepEditor(QWidget):
         if not self.macro.pasos:
             QMessageBox.warning(self, "Macro vacía", "No hay pasos que ejecutar.")
             return
-        if getattr(self, "_range_thread", None) is not None and self._range_thread.isRunning():
+        if self._ejecucion_en_curso():
             QMessageBox.information(self, "En ejecución", "Ya hay una ejecución en curso.")
             return
+        self._range_abortado = False
 
         from pathlib import Path
         from core.replay_runner import ReplayRunner
@@ -649,6 +664,40 @@ class StepEditor(QWidget):
 
         self._range_thread.start()
 
+    # ---- API para que MainWindow pueda parar el editor al cerrar/panic ----
+    def hilos_en_marcha(self) -> list:
+        """Hilos de ejecución del editor actualmente vivos (rango + paso a
+        paso). Los usa MainWindow.closeEvent para no dejar un worker
+        automatizando el escritorio tras cerrar la ventana."""
+        hilos = []
+        th_range = getattr(self, "_range_thread", None)
+        if th_range is not None and th_range.isRunning():
+            hilos.append(th_range)
+        panel = getattr(self, "_step_panel", None)
+        th_step = getattr(panel, "_thread", None) if panel is not None else None
+        if th_step is not None and th_step.isRunning():
+            hilos.append(th_step)
+        return hilos
+
+    def abort(self) -> None:
+        """Aborta cualquier ejecución del editor (rango o paso a paso)."""
+        runner = getattr(self, "_range_runner", None)
+        if runner is not None:
+            try:
+                runner.abort()
+            except Exception:
+                pass
+        panel = getattr(self, "_step_panel", None)
+        if panel is not None:
+            try:
+                panel._on_stop()  # aborta el runner del step-through
+            except Exception:
+                pass
+
+    def _ejecucion_en_curso(self) -> bool:
+        """¿Hay un rango o un paso a paso corriendo? (guardia de solape)."""
+        return bool(self.hilos_en_marcha())
+
     def _on_range_pause(self, paused: bool):
         runner = getattr(self, "_range_runner", None)
         if runner is None:
@@ -656,16 +705,23 @@ class StepEditor(QWidget):
         runner.pause() if paused else runner.resume()
 
     def _on_range_stop(self):
+        self._range_abortado = True
         runner = getattr(self, "_range_runner", None)
         if runner is not None:
             runner.abort()
 
     def _on_range_finished(self, summary):
         self._cleanup_range_control()
-        QMessageBox.information(
-            self, "Ejecución terminada",
-            f"Rango ejecutado · OK={summary.ok} · KO={summary.ko}",
-        )
+        if getattr(self, "_range_abortado", False):
+            QMessageBox.information(
+                self, "Ejecución detenida",
+                f"Detenida por el usuario · OK={summary.ok} · KO={summary.ko}",
+            )
+        else:
+            QMessageBox.information(
+                self, "Ejecución terminada",
+                f"Rango ejecutado · OK={summary.ok} · KO={summary.ko}",
+            )
 
     def _on_range_error(self, msg: str):
         self._cleanup_range_control()
@@ -789,6 +845,7 @@ class StepEditor(QWidget):
         elif clicked is b_remplazar:
             self.macro.pasos = list(macro.pasos)
             self._breakpoints = set()  # los pasos son otros
+            self._highlighted_row = -1  # sin highlight fantasma
             # Contenido nuevo: que el guardado vuelva a avisar antes de
             # sobrescribir un fichero existente con el mismo nombre.
             self._loaded_path = None
