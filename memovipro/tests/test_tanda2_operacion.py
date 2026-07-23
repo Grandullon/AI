@@ -210,6 +210,19 @@ class _FakePanel:
         self._aborted = True
 
 
+class _FakeEditor:
+    """Editor de Macros fake: expone la API que MainWindow usa en el cierre
+    (abort + hilos_en_marcha), sin hilos propios."""
+    def __init__(self):
+        self._aborted = False
+
+    def abort(self):
+        self._aborted = True
+
+    def hilos_en_marcha(self):
+        return []
+
+
 class _FakeThread:
     def __init__(self, corriendo):
         self._corriendo = corriendo
@@ -239,6 +252,7 @@ def _bind_metodos(run_ok, replay_ok, pipe_ok):
     obj.run_panel = _FakePanel(run_ok)
     obj.replay_panel = _FakePanel(replay_ok)
     obj.pipeline_panel = _FakePanel(pipe_ok)
+    obj.step_editor = _FakeEditor()  # MainWindow lo incluye en abort/hilos
     for m in ("_abortar_todo", "_hilos_en_marcha", "_detener_hilos"):
         setattr(obj, m, getattr(MainWindow, m).__get__(obj))
     return obj
