@@ -681,6 +681,11 @@ class StepEditor(QWidget):
 
     def abort(self) -> None:
         """Aborta cualquier ejecución del editor (rango o paso a paso)."""
+        # Marcar el rango como abortado por el usuario (para que el mensaje
+        # final diga "detenida" y no "terminada" cuando se para por
+        # pánico/cierre, que abortan el runner directamente sin pasar por
+        # _on_range_stop).
+        self._range_abortado = True
         runner = getattr(self, "_range_runner", None)
         if runner is not None:
             try:
@@ -691,6 +696,13 @@ class StepEditor(QWidget):
         if panel is not None:
             try:
                 panel._on_stop()  # aborta el runner del step-through
+            except Exception:
+                pass
+            try:
+                # Liberar YA el hook global de teclado (F6-F9). Si no, en un
+                # pánico el panel quedaría con las teclas capturadas hasta
+                # que el worker termine de abortar.
+                panel._stop_hotkeys()
             except Exception:
                 pass
 

@@ -198,6 +198,13 @@ class Player:
         de anunciarla. Aquí solo esperamos y consumimos."""
         if not self._step_mode:
             return
+        # Si ya se pidió abortar, salir SIN esperar. Cierra una carrera:
+        # el `clear()` del loop (antes de anunciar la pausa) podría haber
+        # borrado el `set()` que hace abort() sobre _step_continue; pero
+        # abort() también levanta _abort (que el clear NO toca), así que
+        # aquí lo detectamos y no nos colgamos hasta el timeout de 1h.
+        if self._abort.is_set():
+            return
         # Timeout largo: 1h. Si en una hora no se ha pulsado nada, abandono.
         self._step_continue.wait(timeout=3600.0)
         self._step_continue.clear()

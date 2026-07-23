@@ -20,6 +20,7 @@ def _player_min(step_mode=True, run_mode="step", breakpoints=None):
     p._breakpoints = set(breakpoints or set())
     p._step_continue = threading.Event()
     p._step_back_flag = False
+    p._abort = threading.Event()
     return p
 
 
@@ -216,6 +217,20 @@ def test_esperar_step_no_pierde_set_previo():
     Player._esperar_step(p)   # NO debe bloquear ~3600s
     assert time.time() - inicio < 1.0
     assert not p._step_continue.is_set()  # se consumió (clear final)
+
+
+def test_esperar_step_no_cuelga_si_abort_y_set_perdido():
+    """Cierre de la carrera: si el clear() del loop borró el set() de
+    abort() sobre _step_continue, _esperar_step debe salir igualmente por
+    _abort (que el clear no toca), sin colgarse hasta el timeout de 1h."""
+    import time
+    from core.player import Player
+    p = _player_min()
+    p._abort.set()                 # abort pidió parar
+    p._step_continue.clear()       # pero su set() fue borrado por el loop
+    inicio = time.time()
+    Player._esperar_step(p)        # NO debe bloquear ~3600s
+    assert time.time() - inicio < 1.0
 
 
 def test_esperar_step_bloquea_si_no_hay_set(monkeypatch):
