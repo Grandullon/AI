@@ -184,6 +184,24 @@ class Macro:
         return hashlib.sha256(blob).hexdigest()[:16]
 
 
+def nombre_archivo_macro(nombre: str) -> str:
+    """Convierte el nombre de una macro en un nombre de archivo YAML válido.
+
+    Sanitiza caracteres no válidos y garantiza la extensión .yaml. Fuente
+    única de verdad para el guardado (evita que el editor y otros sitios
+    sanitizen de forma distinta).
+
+        "Rutina Diaria" → "Rutina_Diaria.yaml"
+        "informe.yml"   → "informe.yml"   (respeta .yml existente)
+        ""              → "macro_sin_nombre.yaml"
+    """
+    base = (nombre or "").strip() or "macro_sin_nombre"
+    base = "".join(c if c.isalnum() or c in "-_." else "_" for c in base)
+    if not base.endswith((".yaml", ".yml")):
+        base = f"{base}.yaml"
+    return base
+
+
 _PLACEHOLDER_RE = re.compile(r"\{([A-Z_][A-Z0-9_]*)\}")
 _SECRET_RE = re.compile(r"\{SECRET:([A-Za-z_][A-Za-z0-9_\-]*)\}")
 

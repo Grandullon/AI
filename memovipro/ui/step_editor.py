@@ -61,6 +61,9 @@ class StepEditor(QWidget):
         # el paso a paso debe detenerse. No se guardan en el YAML; son una
         # ayuda de depuración de la sesión.
         self._breakpoints: set[int] = set()
+        # Ruta del YAML cargado/guardado en curso (para volver siempre al
+        # mismo fichero al guardar y no pedir confirmación sobre él mismo).
+        self._loaded_path: Path | None = None
 
         layout = QVBoxLayout(self)
 
@@ -431,6 +434,14 @@ class StepEditor(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "Error", f"No se pudo cargar: {exc}")
             return
+        # El nombre que ve/edita el usuario es el del ARCHIVO, no el `nombre`
+        # interno del YAML. El grabador guarda todo con nombre interno
+        # "grabacion", así que cargar A.yaml mostraba "grabacion" y al
+        # guardar escribía "grabacion.yaml" en vez de A.yaml (y varias
+        # macros se pisaban entre sí). Con esto, cargar X.yaml → guardar
+        # vuelve SIEMPRE a X.yaml.
+        self.macro.nombre = Path(path).stem
+        self._loaded_path = Path(path)
         self._breakpoints = set()  # los breakpoints eran de la macro anterior
         self._sync_to_form()
         self._refresh_table()
@@ -443,15 +454,19 @@ class StepEditor(QWidget):
         PyInstaller. La carpeta y el nombre vienen del propio editor.
         """
         self._sync_from_form()
-        nombre = (self.macro.nombre or "").strip() or "macro_sin_nombre"
-        # Sanitizar nombre para que sea un fichero válido.
-        nombre = "".join(c if c.isalnum() or c in "-_." else "_" for c in nombre)
-        if not nombre.endswith((".yaml", ".yml")):
-            nombre = f"{nombre}.yaml"
+        from core.step_model import nombre_archivo_macro
+        nombre = nombre_archivo_macro(self.macro.nombre)
         self.macros_dir.mkdir(parents=True, exist_ok=True)
         path = self.macros_dir / nombre
 
-        if path.exists():
+        # Solo preguntamos "¿sobrescribir?" si el fichero existe Y NO es el
+        # mismo que cargamos (guardar sobre el propio archivo cargado es lo
+        # normal, no debe molestar con una confirmación cada vez).
+        es_el_cargado = (
+            getattr(self, "_loaded_path", None) is not None
+            and self._loaded_path.resolve() == path.resolve()
+        )
+        if path.exists() and not es_el_cargado:
             resp = QMessageBox.question(
                 self,
                 "Sobrescribir",
@@ -466,6 +481,9 @@ class StepEditor(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "Error", f"No se pudo guardar: {exc}")
             return
+        # A partir de ahora, este es el fichero "en curso": guardar de nuevo
+        # (mismo nombre) irá aquí sin volver a preguntar.
+        self._loaded_path = path
         QMessageBox.information(self, "Guardado", f"Macro guardada en:\n{path}")
 
     def _launch_recorder(self):
@@ -770,6 +788,10 @@ class StepEditor(QWidget):
             self.macro.pasos.extend(macro.pasos)
         elif clicked is b_remplazar:
             self.macro.pasos = list(macro.pasos)
+            self._breakpoints = set()  # los pasos son otros
+            # Contenido nuevo: que el guardado vuelva a avisar antes de
+            # sobrescribir un fichero existente con el mismo nombre.
+            self._loaded_path = None
         else:
             return
         self._refresh_table()
