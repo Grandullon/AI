@@ -1,0 +1,30 @@
+# Secretos — nunca subir
+.env
+credentials.json
+token.json
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Editores
+.vscode/
+.idea/
+*.swp
+.DS_Store
