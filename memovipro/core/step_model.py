@@ -33,6 +33,10 @@ class StepType(str, Enum):
                                        # buscándola en pantalla con OCR. Robusto
                                        # frente a cambios de UI (no depende de
                                        # coordenadas ni de selectores).
+    GET_TEXT = "get_text"              # Lee el texto de un control (árbol UIA,
+                                       # con OCR de respaldo). Lo guarda en una
+                                       # variable de contexto y/o verifica que
+                                       # contiene un texto esperado.
 
 
 @dataclass
@@ -65,6 +69,11 @@ class Step:
     # como fallido → incidencia clara en vez de fallo en cascada.
     verificar_ventana: str = ""
     verificar_timeout_s: float = 10.0
+    # Verificación de TEXTO post-paso: tras ejecutar, leer el texto del
+    # control objetivo (su selector, o la ventana principal) y comprobar
+    # que contiene esta cadena (comparación laxa: sin acentos/mayúsculas).
+    # Si no la contiene en verificar_timeout_s, el paso falla → incidencia.
+    verificar_texto: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"tipo": self.tipo.value}
@@ -85,6 +94,12 @@ class Step:
         if self.verificar_ventana:
             d["verificar_ventana"] = self.verificar_ventana
             if self.verificar_timeout_s != 10.0:
+                d["verificar_timeout_s"] = self.verificar_timeout_s
+        if self.verificar_texto:
+            d["verificar_texto"] = self.verificar_texto
+            # Comparte verificar_timeout_s con verificar_ventana; solo lo
+            # serializamos aparte si no está ya escrito por verificar_ventana.
+            if self.verificar_timeout_s != 10.0 and not self.verificar_ventana:
                 d["verificar_timeout_s"] = self.verificar_timeout_s
         if self.descripcion:
             d["descripcion"] = self.descripcion
@@ -109,6 +124,7 @@ class Step:
             delay_before_s=float(d.get("delay_before_s", 0.0)),
             verificar_ventana=d.get("verificar_ventana", ""),
             verificar_timeout_s=float(d.get("verificar_timeout_s", 10.0)),
+            verificar_texto=d.get("verificar_texto", ""),
         )
 
 
@@ -336,4 +352,5 @@ def render_step(step: Step, ctx: dict[str, str]) -> Step:
         delay_before_s=step.delay_before_s,
         verificar_ventana=render_placeholders(step.verificar_ventana, ctx) if step.verificar_ventana else "",
         verificar_timeout_s=step.verificar_timeout_s,
+        verificar_texto=render_placeholders(step.verificar_texto, ctx) if step.verificar_texto else "",
     )

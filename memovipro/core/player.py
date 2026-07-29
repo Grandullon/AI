@@ -115,6 +115,9 @@ class Player:
         # usuario decide (avanzar 1, continuar al siguiente, grabar).
         self._breakpoints: set[int] = {int(b) for b in (breakpoints or set())}
         self._run_mode: str = run_mode if run_mode in ("step", "continue") else "step"
+        # Contexto de la ejecución en curso (variables por DNI). Lo usa
+        # GET_TEXT para guardar el texto leído en una variable reutilizable.
+        self._ctx: dict | None = None
 
     def abort(self) -> None:
         self._abort.set()
@@ -225,6 +228,10 @@ class Player:
             raise RuntimeError("pywinauto no disponible (solo Windows)")
 
         ctx = {k.upper(): str(v) for k, v in fila.items()}
+        # Exponer ctx para que GET_TEXT pueda guardar variables leídas
+        # ({TEXTO_LEIDO}, etc.) que los pasos siguientes usan como
+        # placeholders (misma referencia de dict → se ven al renderizar).
+        self._ctx = ctx
         dni = ctx.get("DNI", "")
         incidencias: list[Incidencia] = []
 
@@ -340,6 +347,25 @@ class Player:
                                     f"Verificación fallida: la ventana "
                                     f"'{paso_render.verificar_ventana}' no apareció "
                                     f"en {paso_render.verificar_timeout_s:g}s"
+                                ),
+                                paso_idx=idx, paso=paso_render,
+                            )
+                            inc = self._registrar_fallo(dni, idx, paso_render, exc)
+                            incidencias.append(inc)
+                            return False, incidencias
+
+                # Verificación de TEXTO post-paso: leer el texto del control
+                # objetivo y comprobar que contiene lo esperado (p. ej. tras
+                # guardar, que el campo diga "Guardado"). Más fino que
+                # esperar a que aparezca una ventana.
+                if paso_render.verificar_texto and not self._abort.is_set():
+                    if not self._verificar_texto_en_paso(paso_render):
+                        if not paso.opcional:
+                            exc = StepFailed(
+                                motivo=(
+                                    f"Verificación de texto fallida: no se leyó "
+                                    f"'{paso_render.verificar_texto}' en "
+                                    f"{paso_render.verificar_timeout_s:g}s"
                                 ),
                                 paso_idx=idx, paso=paso_render,
                             )
@@ -497,6 +523,9 @@ class Player:
             return
         if tipo == StepType.CLICK_OCR_TEXT:
             self._click_ocr_text(paso)
+            return
+        if tipo == StepType.GET_TEXT:
+            self._get_text(paso)
             return
         raise ValueError(f"Tipo de paso no soportado: {tipo}")
 
@@ -980,6 +1009,92 @@ class Player:
             texto, hit.texto, abs_x, abs_y, hit.confidence,
         )
         self._click_xy(abs_x, abs_y, button=button, double=double)
+
+    # ---- Lectura de texto (escalera UIA → OCR, estilo UiPath) ----
+    def _leer_texto(self, paso: Step) -> str:
+        """Lee el texto del control objetivo del paso (o de la ventana
+        principal si el paso no tiene selector).
+
+        Escalón 1: árbol UIA (Name/Value/descendientes) — instantáneo.
+        Escalón 2: OCR del rectángulo del control si el árbol no dio texto.
+        """
+        from .text_read import extraer_texto_de_control
+        ctrl = None
+        if paso.selector and not paso.selector.is_empty():
+            ctrl = self._resolve_control(paso)
+        elif self.macro.ventana_principal:
+            win = Desktop(backend="uia").window(
+                title_re=f".*{self.macro.ventana_principal}.*"
+            )
+            if win.exists(timeout=min(paso.timeout_s, 3.0)):
+                ctrl = win
+        if ctrl is None:
+            return ""
+
+        texto = extraer_texto_de_control(ctrl)
+        if texto:
+            return texto
+
+        # Respaldo OCR del rectángulo del control (texto pintado como imagen).
+        try:
+            from .ocr import disponible as ocr_disponible, ocr_imagen
+            if ocr_disponible():
+                r = ctrl.rectangle()
+                from .screenshot import capturar_region
+                shot = capturar_region(
+                    self.screenshots_dir,
+                    (r.left, r.top, r.width(), r.height()),
+                    prefijo="gettext",
+                )
+                if shot:
+                    return ocr_imagen(str(shot))
+        except Exception as exc:
+            logger.debug("OCR de respaldo en _leer_texto falló: {}", exc)
+        return ""
+
+    def _get_text(self, paso: Step) -> None:
+        """GET_TEXT: lee el texto del control y lo guarda en una variable de
+        contexto (`extra.guardar_en`) y/o verifica que contiene un texto
+        esperado (`extra.contiene`). Si no lo contiene, el paso falla."""
+        extra = paso.extra or {}
+        guardar_en = str(extra.get("guardar_en", "")).strip()
+        contiene = str(extra.get("contiene", "")).strip()
+        if self.dry_run:
+            logger.info("[dry-run] get_text (guardar_en={}, contiene={})", guardar_en, contiene)
+            return
+        texto = self._leer_texto(paso)
+        logger.info('GET_TEXT leyó: "{}"', (texto or "")[:120])
+        if guardar_en and self._ctx is not None:
+            # En MAYÚSCULAS: los placeholders {NOMBRE} son uppercase.
+            self._ctx[guardar_en.upper()] = texto
+        if contiene:
+            from .text_read import texto_contiene
+            if not texto_contiene(texto, contiene):
+                raise ValueError(
+                    f'El texto leído no contiene "{contiene}" (leído: "{(texto or "")[:80]}")'
+                )
+
+    def _verificar_texto_en_paso(self, paso: Step) -> bool:
+        """Verificación post-paso: lee el texto del control objetivo (o la
+        ventana principal) y comprueba, con reintentos hasta el timeout, que
+        contiene `paso.verificar_texto`. Devuelve True si aparece."""
+        from .text_read import texto_contiene
+        if self.dry_run:
+            logger.info("[dry-run] verificar_texto '{}'", paso.verificar_texto)
+            return True
+        fin = time.time() + max(0.5, paso.verificar_timeout_s)
+        while time.time() < fin:
+            if self._abort.is_set():
+                return False
+            try:
+                texto = self._leer_texto(paso)
+            except Exception as exc:
+                logger.debug("verificar_texto: fallo leyendo ({})", exc)
+                texto = ""
+            if texto_contiene(texto, paso.verificar_texto):
+                return True
+            time.sleep(0.4)
+        return False
 
     def _type_text(self, paso: Step) -> None:
         if paso.selector and not paso.selector.is_empty():

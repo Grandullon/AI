@@ -141,7 +141,9 @@ class StepEditor(QWidget):
             espera = f"{paso.delay_before_s:.2f}" if paso.delay_before_s > 0 else ""
             desc = paso.descripcion
             if paso.verificar_ventana:
-                desc = f"{desc}  ✓verifica:'{paso.verificar_ventana}'"
+                desc = f"{desc}  ✓ventana:'{paso.verificar_ventana}'"
+            if paso.verificar_texto:
+                desc = f"{desc}  ✓texto:'{paso.verificar_texto}'"
             # Marca ● roja en la columna # si el paso es punto de análisis.
             num_txt = f"🔴 {i + 1}" if i in self._breakpoints else str(i + 1)
             valores = [
@@ -233,6 +235,7 @@ class StepEditor(QWidget):
         StepType.TYPE_TEXT, StepType.SEND_KEYS, StepType.SLEEP,
         StepType.FOCUS_WINDOW, StepType.WAIT_FOR_WINDOW, StepType.CLOSE_WINDOW,
         StepType.LAUNCH_PROGRAM, StepType.IF_VENTANA, StepType.CLICK_OCR_TEXT,
+        StepType.GET_TEXT,
     }
 
     def _add_step(self):
@@ -273,6 +276,11 @@ class StepEditor(QWidget):
         # CLICK_OCR_TEXT: pide texto a buscar + confianza mínima + opciones
         if paso.tipo == StepType.CLICK_OCR_TEXT:
             self._edit_click_ocr_text(paso)
+            return
+
+        # GET_TEXT: variable donde guardar + texto que debe contener
+        if paso.tipo == StepType.GET_TEXT:
+            self._edit_get_text(paso)
             return
 
         text, ok = QInputDialog.getText(self, "Editar valor", "Valor / título:", text=paso.valor or paso.titulo or "")
@@ -368,6 +376,42 @@ class StepEditor(QWidget):
         paso.descripcion = f'{verbo} en texto "{texto}" (conf≥{conf})'
         self._refresh_table()
 
+    def _edit_get_text(self, paso: Step):
+        """Editor de un paso GET_TEXT: lee el texto del control seleccionado
+        (por su selector, o de la ventana principal) y opcionalmente lo
+        guarda en una variable y/o verifica que contiene un texto."""
+        extra = paso.extra or {}
+        var, ok = QInputDialog.getText(
+            self, "Leer texto → variable",
+            "Nombre de variable donde guardar el texto leído (opcional).\n"
+            "Podrás usarla luego como {NOMBRE} en otros pasos.\n"
+            "Ej: TEXTO_LEIDO",
+            text=str(extra.get("guardar_en", "")),
+        )
+        if not ok:
+            return
+        contiene, ok2 = QInputDialog.getText(
+            self, "Verificar contenido (opcional)",
+            "Comprobar que el texto leído CONTIENE (case-insensitive, sin "
+            "acentos). Vacío = no verificar.\nEj: 'Guardado' o 'correcto'",
+            text=str(extra.get("contiene", "")),
+        )
+        if not ok2:
+            return
+        nueva = {}
+        if var.strip():
+            nueva["guardar_en"] = var.strip()
+        if contiene.strip():
+            nueva["contiene"] = contiene.strip()
+        paso.extra = nueva
+        partes = []
+        if var.strip():
+            partes.append(f"→ {{{var.strip().upper()}}}")
+        if contiene.strip():
+            partes.append(f'contiene "{contiene.strip()}"')
+        paso.descripcion = "Leer texto " + (" · ".join(partes) if partes else "(sin destino)")
+        self._refresh_table()
+
     def _edit_verificacion(self):
         """Configura la verificación post-paso del paso seleccionado:
         tras ejecutarlo, esperar a que aparezca una ventana. Si no
@@ -387,10 +431,21 @@ class StepEditor(QWidget):
         if not ok:
             return
         paso.verificar_ventana = text.strip()
-        if paso.verificar_ventana:
+        # Verificación de TEXTO (además/en vez de la de ventana): comprobar
+        # que el control objetivo del paso contiene un texto tras ejecutarlo.
+        txt, ok_t = QInputDialog.getText(
+            self, "Verificación de texto (opcional)",
+            "Tras este paso, comprobar que el control (su selector, o la "
+            "ventana principal) CONTIENE este texto. Vacío = no verificar.\n"
+            "Ej: 'Guardado correctamente'",
+            text=paso.verificar_texto,
+        )
+        if ok_t:
+            paso.verificar_texto = txt.strip()
+        if paso.verificar_ventana or paso.verificar_texto:
             seg, ok2 = QInputDialog.getInt(
                 self, "Timeout de verificación",
-                "Segundos máximos a esperar a que aparezca la ventana:",
+                "Segundos máximos a esperar a la verificación:",
                 int(paso.verificar_timeout_s), 1, 120,
             )
             if ok2:
