@@ -153,6 +153,33 @@ def test_verificar_texto_no_colisiona_con_verificar_ventana_en_timeout():
 
 # ==================== Player: cableado ====================
 
+def test_nombre_variable_valido():
+    """Solo nombres usables luego como {NOMBRE} (regex de placeholders)."""
+    from core.step_model import nombre_variable_valido
+    assert nombre_variable_valido("TEXTO_LEIDO")
+    assert nombre_variable_valido("importe2")      # se normaliza a mayúsculas
+    assert nombre_variable_valido("_tmp")
+    # No válidos: espacios, empezar por dígito, símbolos, vacío
+    assert not nombre_variable_valido("MI VAR")
+    assert not nombre_variable_valido("1X")
+    assert not nombre_variable_valido("a-b")
+    assert not nombre_variable_valido("")
+
+
+def test_variable_valida_se_sustituye_de_verdad():
+    """Un nombre que pasa la validación debe funcionar como placeholder."""
+    from core.step_model import nombre_variable_valido, render_placeholders
+    var = "TEXTO_LEIDO"
+    assert nombre_variable_valido(var)
+    assert render_placeholders("valor: {TEXTO_LEIDO}", {"TEXTO_LEIDO": "OK"}) == "valor: OK"
+
+
+def test_editor_valida_nombre_de_variable():
+    src = (ROOT / "ui" / "step_editor.py").read_text(encoding="utf-8")
+    fn = src.split("def _edit_get_text")[1].split("def ")[0]
+    assert "nombre_variable_valido" in fn
+
+
 def test_player_dispatch_get_text():
     import inspect
     from core.player import Player

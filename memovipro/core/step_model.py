@@ -253,6 +253,19 @@ _PLACEHOLDER_RE = re.compile(r"\{([A-Z_][A-Z0-9_]*)\}")
 _SECRET_RE = re.compile(r"\{SECRET:([A-Za-z_][A-Za-z0-9_\-]*)\}")
 
 
+def nombre_variable_valido(nombre: str) -> bool:
+    """¿`nombre` sirve como variable usable luego como {NOMBRE}?
+
+    Debe casar con el regex de placeholders una vez en mayúsculas: letras,
+    números y guion bajo, sin empezar por dígito. Sin esta validación, un
+    nombre como "MI VAR" se guardaría en el contexto pero {MI VAR} nunca
+    lo sustituiría — y el usuario no se enteraría.
+    """
+    if not nombre:
+        return False
+    return bool(_PLACEHOLDER_RE.fullmatch("{" + nombre.strip().upper() + "}"))
+
+
 def _resolve_secret(name: str) -> str:
     """Resuelve un placeholder {SECRET:nombre} contra el almacén DPAPI/keyring.
 

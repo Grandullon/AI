@@ -390,6 +390,21 @@ class StepEditor(QWidget):
         )
         if not ok:
             return
+        # Validar el nombre: debe poder usarse luego como {NOMBRE}, es decir
+        # casar con el regex de placeholders (letras/números/_ y sin empezar
+        # por dígito). Si no, la variable se guardaría pero {..} nunca la
+        # sustituiría y el usuario no se enteraría.
+        var = var.strip()
+        if var:
+            from core.step_model import nombre_variable_valido
+            if not nombre_variable_valido(var):
+                QMessageBox.warning(
+                    self, "Nombre de variable no válido",
+                    f"'{var}' no sirve como variable.\n\n"
+                    "Usa solo letras, números y guion bajo, y no empieces "
+                    "por un número (ej. TEXTO_LEIDO, importe2).",
+                )
+                return
         contiene, ok2 = QInputDialog.getText(
             self, "Verificar contenido (opcional)",
             "Comprobar que el texto leído CONTIENE (case-insensitive, sin "
