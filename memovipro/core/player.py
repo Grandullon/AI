@@ -148,9 +148,7 @@ class Player:
     def advance_step(self) -> None:
         """Avanza UN paso y vuelve a pausar (modo paso a paso)."""
         self._run_mode = "step"
-        self._step_back_flag = False
-        self._skip_flag = False
-        self._repeat_flag = False
+        self._reset_flags_navegacion()
         self._step_continue.set()
 
     def skip_step(self) -> None:
@@ -159,8 +157,7 @@ class Player:
         Útil cuando el usuario ya hizo esa acción a mano mientras depuraba
         y no quiere que se repita."""
         self._run_mode = "step"
-        self._step_back_flag = False
-        self._repeat_flag = False
+        self._reset_flags_navegacion()
         self._skip_flag = True
         self._step_continue.set()
 
@@ -170,8 +167,7 @@ class Player:
         Permite afinar un paso que falla (cambiar el selector, mover la
         ventana...) y volver a probarlo tantas veces como haga falta."""
         self._run_mode = "step"
-        self._step_back_flag = False
-        self._skip_flag = False
+        self._reset_flags_navegacion()
         self._repeat_flag = True
         self._step_continue.set()
 
@@ -180,14 +176,21 @@ class Player:
         (breakpoint) o el final. Si no hay más breakpoints, termina la
         macro sin más pausas."""
         self._run_mode = "continue"
-        self._step_back_flag = False
+        self._reset_flags_navegacion()
         self._step_continue.set()
 
     def _reset_flags_navegacion(self) -> None:
-        """Limpia los flags de navegación del paso a paso."""
+        """Limpia los flags de navegación del paso a paso.
+
+        Se llama (a) al reanudar en modo continuo y (b) en el bucle justo
+        antes de anunciar una pausa, para descartar pulsaciones hechas
+        MIENTRAS se ejecutaba el paso anterior. Sin esto, un F4/F5 pulsado
+        a destiempo se aplicaba más tarde: saltaba un paso que no tocaba o
+        repetía una acción real sobre la aplicación."""
         self._step_back_flag = False
         self._skip_flag = False
         self._repeat_flag = False
+        self._recargar_flag = False
 
     def step_back(self) -> None:
         """En modo step-through, retrocede el puntero un paso.
@@ -197,8 +200,7 @@ class Player:
         reejecutarlo con el siguiente ▶. Despierta el wait igual que
         advance_step(), marcando la intención de retroceder."""
         self._run_mode = "step"
-        self._skip_flag = False
-        self._repeat_flag = False
+        self._reset_flags_navegacion()
         self._step_back_flag = True
         self._step_continue.set()
 
@@ -236,6 +238,10 @@ class Player:
         ejecutar nada, re-lee `macro.pasos[_step_idx]` y se vuelve a
         pausar mostrando el paso correcto."""
         self._step_idx = max(0, int(idx))
+        # Forzar modo paso: tras editar la macro SIEMPRE hay que volver a
+        # pausar, aunque la sesión viniese auto-reproduciendo.
+        self._run_mode = "step"
+        self._reset_flags_navegacion()
         self._recargar_flag = True
         self._step_continue.set()
 
@@ -321,8 +327,17 @@ class Player:
                 # Paso desactivado por el usuario: saltarlo sin ejecutarlo
                 # ni anunciarlo (no existe para la reproducción).
                 if not paso.activo:
-                    logger.debug("Paso {} desactivado — saltado", idx + 1)
-                    self._step_idx += 1
+                    # Un IF_VENTANA desactivado se salta JUNTO CON su bloque
+                    # "entonces": si solo saltásemos la condición, el bloque
+                    # que protege se ejecutaría siempre (justo lo contrario
+                    # de lo que espera quien desactiva la guarda).
+                    salto = 1
+                    if paso.tipo == StepType.IF_VENTANA:
+                        salto += max(0, int((paso.extra or {}).get("saltar_si_no", 0)))
+                    logger.debug(
+                        "Paso {} desactivado — saltado ({} posiciones)", idx + 1, salto,
+                    )
+                    self._step_idx += salto
                     continue
                 # Esperar si está en pausa.
                 self._esperar_si_pausado()
@@ -337,8 +352,11 @@ class Player:
                 if debe_pausar:
                     # Descartar pulsaciones PREVIAS a la pausa (hechas durante
                     # la ejecución del paso anterior). Las que lleguen tras el
-                    # anuncio de abajo sí cuentan y no se pierden.
+                    # anuncio de abajo sí cuentan y no se pierden. Hay que
+                    # limpiar también los FLAGS, no solo el evento: si no, un
+                    # F4/F5 a destiempo saltaba o repetía el paso equivocado.
                     self._step_continue.clear()
+                    self._reset_flags_navegacion()
                 if self._step_mode and self.on_status:
                     self.on_status(RunStatus(
                         dni=dni, paso_idx=idx,
@@ -363,7 +381,14 @@ class Player:
                         continue
                     if self._step_back_flag:
                         self._step_back_flag = False
-                        self._step_idx = max(self._start_idx, idx - 1)
+                        # Retroceder hasta el paso ACTIVO anterior: si no,
+                        # con un paso desactivado justo antes, ◀ Atrás era
+                        # un no-op (se saltaba y volvía al mismo sitio).
+                        anterior = idx - 1
+                        while (anterior > self._start_idx
+                               and not self.macro.pasos[anterior].activo):
+                            anterior -= 1
+                        self._step_idx = max(self._start_idx, anterior)
                         continue
                     # Saltar: avanzar el puntero SIN ejecutar este paso.
                     if self._skip_flag:

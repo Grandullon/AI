@@ -10,6 +10,34 @@ verdad entre el editor y el panel de step-through.
 from __future__ import annotations
 
 
+def breakpoints_alcanzables(breakpoints, start_idx: int, pasos) -> set[int]:
+    """Breakpoints que la ejecución puede llegar a disparar de verdad.
+
+    Descarta los que quedan ANTES del punto de arranque y los que están
+    sobre pasos desactivados (que nunca se ejecutan). Sin este filtro, una
+    sesión podía entrar en modo "continuo" con puntos inalcanzables y
+    reproducir la macro entera sin pararse nunca.
+    """
+    out = set()
+    for b in breakpoints or ():
+        if b < start_idx or b < 0 or b >= len(pasos):
+            continue
+        if not getattr(pasos[b], "activo", True):
+            continue
+        out.add(int(b))
+    return out
+
+
+def decidir_run_mode(breakpoints, start_idx: int, pasos) -> str:
+    """'continue' si hay algún punto de análisis alcanzable; si no 'step'.
+
+    En 'continue' la macro se auto-reproduce hasta el siguiente punto; en
+    'step' se para en cada paso. Decidirlo con los puntos ALCANZABLES
+    evita el caso "no para nunca" descrito arriba.
+    """
+    return "continue" if breakpoints_alcanzables(breakpoints, start_idx, pasos) else "step"
+
+
 def shift_on_insert(breakpoints: set[int], insert_at: int, n: int = 1) -> set[int]:
     """Tras insertar `n` pasos en la posición `insert_at`, los breakpoints
     en/tras ese punto se desplazan +n."""

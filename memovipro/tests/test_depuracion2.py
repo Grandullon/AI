@@ -362,6 +362,115 @@ def test_reemplazar_no_ejecuta_el_paso_borrado(monkeypatch):
     assert ejecutados == ["NUEVO"]
 
 
+# ==================== hallazgos de la revisión ====================
+
+def test_continue_run_limpia_los_flags():
+    """Un F4/F5 pulsado a destiempo no debe aplicarse al reanudar."""
+    from core.player import Player
+    p = _player_min()
+    p._skip_flag = True
+    p._repeat_flag = True
+    p._recargar_flag = True
+    Player.continue_run(p)
+    assert (p._skip_flag, p._repeat_flag, p._recargar_flag) == (False, False, False)
+    assert p._run_mode == "continue"
+
+
+def test_run_mode_solo_cuenta_breakpoints_alcanzables():
+    """Un punto anterior a start_idx o sobre un paso desactivado no
+    dispararía: si fuese el único, la sesión debe arrancar en 'step' y no
+    auto-reproducir la macro entera."""
+    from core.debug_marks import decidir_run_mode, breakpoints_alcanzables
+    from core.step_model import Step, StepType
+
+    pasos = [Step(tipo=StepType.SLEEP, valor="0") for _ in range(5)]
+    # bp anterior al arranque → inalcanzable
+    assert decidir_run_mode({1}, 3, pasos) == "step"
+    # bp alcanzable
+    assert decidir_run_mode({4}, 3, pasos) == "continue"
+    # bp sobre paso desactivado → inalcanzable
+    pasos[4].activo = False
+    assert decidir_run_mode({4}, 3, pasos) == "step"
+    assert breakpoints_alcanzables({1, 4}, 3, pasos) == set()
+    # fuera de rango
+    assert decidir_run_mode({99}, 0, pasos) == "step"
+
+
+def test_if_ventana_desactivado_salta_tambien_su_bloque(monkeypatch):
+    """Desactivar la condición no debe dejar su bloque ejecutándose
+    siempre: se salta la guarda Y los pasos que protege."""
+    monkeypatch.setattr("core.player._HAS_PYWINAUTO", True)
+    from core.player import Player
+    from core.step_model import Macro, Step, StepType
+
+    pasos = [
+        Step(tipo=StepType.IF_VENTANA, extra={"ventana": "X", "saltar_si_no": 2},
+             activo=False, descripcion="IF"),
+        Step(tipo=StepType.SLEEP, valor="0", descripcion="BLOQUE1"),
+        Step(tipo=StepType.SLEEP, valor="0", descripcion="BLOQUE2"),
+        Step(tipo=StepType.SLEEP, valor="0", descripcion="DESPUES"),
+    ]
+    macro = Macro(nombre="m", pasos=pasos, auto_anchor=False)
+    ejecutados = []
+    monkeypatch.setattr(
+        Player, "_ejecutar_paso",
+        lambda self, paso, idx: ejecutados.append(paso.descripcion),
+    )
+    p = Player(macro=macro, screenshots_dir=".", logger=None, dry_run=True)
+    exito, _ = p.ejecutar_dni({"DNI": "x"})
+    assert exito is True
+    # El bloque protegido NO se ejecuta; solo lo posterior.
+    assert ejecutados == ["DESPUES"]
+
+
+def test_atras_salta_pasos_desactivados(monkeypatch):
+    """◀ Atrás debe retroceder al paso ACTIVO anterior, no quedarse
+    clavado por culpa de uno desactivado en medio."""
+    import time
+    monkeypatch.setattr("core.player._HAS_PYWINAUTO", True)
+    from core.player import Player
+    from core.step_model import Macro, Step, StepType
+
+    pasos = [
+        Step(tipo=StepType.SLEEP, valor="0", descripcion="A"),
+        Step(tipo=StepType.SLEEP, valor="0", descripcion="B", activo=False),
+        Step(tipo=StepType.SLEEP, valor="0", descripcion="C"),
+    ]
+    macro = Macro(nombre="m", pasos=pasos, auto_anchor=False)
+    pausas = []
+    monkeypatch.setattr(Player, "_ejecutar_paso", lambda self, paso, idx: None)
+    p = Player(
+        macro=macro, screenshots_dir=".", logger=None, dry_run=True,
+        step_mode=True, run_mode="step",
+        on_status=lambda st: pausas.append(st.paso_idx) if st.en_pausa else None,
+    )
+
+    parar = threading.Event()
+    estado = {"atras": False}
+
+    def usuario():
+        vistas = 0
+        while not parar.is_set():
+            if len(pausas) > vistas:
+                idx = pausas[vistas]
+                vistas += 1
+                time.sleep(0.05)
+                if idx == 2 and not estado["atras"]:
+                    estado["atras"] = True
+                    p.step_back()     # desde C: debe ir a A, no quedarse en C
+                else:
+                    p.advance_step()
+            time.sleep(0.02)
+
+    t = threading.Thread(target=usuario, daemon=True)
+    t.start()
+    exito, _ = p.ejecutar_dni({"DNI": "x"})
+    parar.set()
+    assert exito is True
+    # Pausó en 0, 2, y tras el Atrás volvió al 0 (saltando el desactivado)
+    assert pausas[:3] == [0, 2, 0]
+
+
 # ==================== propagación y cableado ====================
 
 def test_replay_runner_propaga_skip_y_repeat():
@@ -382,11 +491,11 @@ def test_replay_runner_propaga_skip_y_repeat():
 def test_panel_tiene_botones_y_atajos():
     src = (ROOT / "ui" / "step_through_panel.py").read_text(encoding="utf-8")
     # Botones nuevos
-    for marca in ("⏭ F4", "🔁 F5", "✏️ Editar"):
+    for marca in ("⏭ F4", "🔁 F12", "✏️ Editar"):
         assert marca in src
     # Atajos globales nuevos
     assert '_pynput_keyboard.Key.f4: "skip"' in src
-    assert '_pynput_keyboard.Key.f5: "repeat"' in src
+    assert '_pynput_keyboard.Key.f12: "repeat"' in src
     # Y el despachador los conoce
     assert '"skip": self._on_skip' in src
     assert '"repeat": self._on_repeat' in src

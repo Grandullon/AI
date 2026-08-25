@@ -597,6 +597,14 @@ class StepEditor(QWidget):
         if row in self._breakpoints:
             self._breakpoints.discard(row)
         else:
+            if not self.macro.pasos[row].activo:
+                QMessageBox.warning(
+                    self, "Paso desactivado",
+                    f"El paso {row + 1} está desactivado: nunca se ejecuta, "
+                    "así que el punto de análisis no llegaría a dispararse.\n\n"
+                    "Actívalo primero.",
+                )
+                return
             self._breakpoints.add(row)
         self._refresh_table()
         self.tabla.selectRow(row)
@@ -614,6 +622,20 @@ class StepEditor(QWidget):
             )
             return
         paso = self.macro.pasos[row]
+        # Desactivar un condicional desactiva TAMBIÉN su bloque "entonces"
+        # (si no, el bloque protegido se ejecutaría siempre). Avisamos para
+        # que no sorprenda.
+        if paso.activo and paso.tipo == StepType.IF_VENTANA:
+            saltar = max(0, int((paso.extra or {}).get("saltar_si_no", 0)))
+            if saltar and QMessageBox.question(
+                self, "Desactivar condicional",
+                f"Este paso es una condición que protege los {saltar} pasos "
+                "siguientes.\n\nAl desactivarla se saltarán TAMBIÉN esos "
+                f"{saltar} pasos (si no, se ejecutarían siempre).\n\n¿Continuar?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            ) != QMessageBox.StandardButton.Yes:
+                return
         paso.activo = not paso.activo
         self._refresh_table()
         self.tabla.selectRow(row)
@@ -623,7 +645,11 @@ class StepEditor(QWidget):
         (que el panel ha desplazado) de vuelta al editor y refrescamos."""
         panel = getattr(self, "_step_panel", None)
         if panel is not None:
-            self._breakpoints = set(getattr(panel, "_breakpoints", self._breakpoints))
+            bps = set(getattr(panel, "_breakpoints", self._breakpoints))
+            # Restar los breakpoints temporales de la sesión (el de
+            # "▶ Hasta aquí"): son de la ejecución, no marcas del usuario.
+            bps -= set(getattr(panel, "_bp_temporales", set()))
+            self._breakpoints = bps
         self._refresh_table()
 
     def _launch_step_through(self):
@@ -666,9 +692,11 @@ class StepEditor(QWidget):
 
         # Solo breakpoints dentro del rango actual de pasos.
         bps = {b for b in self._breakpoints if 0 <= b < len(self.macro.pasos)}
+        temporales = set()
         if breakpoints_extra:
-            bps = bps | {b for b in breakpoints_extra
-                         if 0 <= b < len(self.macro.pasos)}
+            temporales = {b for b in breakpoints_extra
+                          if 0 <= b < len(self.macro.pasos)} - bps
+            bps = bps | temporales
         from .step_through_panel import StepThroughPanel
         self._step_panel = StepThroughPanel(
             macro=self.macro,
@@ -678,6 +706,7 @@ class StepEditor(QWidget):
             on_step_changed=self.highlight_step,
             breakpoints=bps,
             start_idx=start_idx,
+            bp_temporales=temporales,
             parent=self,
         )
         self._step_panel.finished.connect(self._on_step_through_finished)
@@ -714,6 +743,16 @@ class StepEditor(QWidget):
         if row < 0:
             QMessageBox.information(self, "Selecciona un paso",
                                     "Pincha la fila hasta la que quieres ejecutar.")
+            return
+        # Un paso desactivado NUNCA se ejecuta, así que un punto de parada
+        # sobre él no dispararía: la macro correría entera sin supervisión.
+        if not self.macro.pasos[row].activo:
+            QMessageBox.warning(
+                self, "Paso desactivado",
+                f"El paso {row + 1} está desactivado, así que la ejecución "
+                "no se detendría ahí (correría la macro entera).\n\n"
+                "Actívalo primero o elige otro paso.",
+            )
             return
         # Se reproduce sola hasta ese paso y SE QUEDA AHÍ EN PAUSA, dentro
         # de la sesión de depuración: así puedes grabar/insertar/saltar en

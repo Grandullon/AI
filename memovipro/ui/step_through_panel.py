@@ -8,7 +8,10 @@ paso, o saltar al siguiente punto.
 Atajos GLOBALES (funcionan aunque el foco esté en la app que se
 automatiza, no solo con MemoviPro enfocado):
     F8 = siguiente · F7 = atrás · F6 = continuar (al siguiente punto)
+    F4 = saltar el paso sin ejecutarlo · F12 = repetirlo sin avanzar
     F9 = parar
+Las pulsaciones con Alt/Ctrl se ignoran (para no confundir un Alt+F4 de
+la aplicación con nuestro "saltar").
 Además, con MemoviPro enfocado, valen Espacio/F10/→ (siguiente),
 ← (atrás) y Esc (parar).
 
@@ -124,8 +127,12 @@ class StepThroughPanel(QWidget):
         on_step_changed: Callable[[int], None] | None = None,
         breakpoints: set[int] | None = None,
         start_idx: int = 0,
+        bp_temporales: set[int] | None = None,
         parent=None,
     ):
+        # Guardamos el padre ANTES de hacernos top-level: lo necesitamos
+        # para localizar la ventana principal sin buscar por nombre de clase.
+        self._owner = parent
         super().__init__(parent=None)  # top-level
         self.macro = macro
         self.screenshots_dir = screenshots_dir
@@ -133,14 +140,22 @@ class StepThroughPanel(QWidget):
         self.on_macro_modified = on_macro_modified
         self.on_step_changed = on_step_changed
         self._breakpoints = {int(b) for b in (breakpoints or set())}
+        # Breakpoints puestos por la sesión (p.ej. el de "▶ Hasta aquí"),
+        # NO por el usuario: se desplazan igual que los demás pero el
+        # editor los resta al final para no dejarlos marcados en la tabla.
+        self._bp_temporales = {int(b) for b in (bp_temporales or set())}
         self._kb_listener = None
-        # Con breakpoints arrancamos en modo "continue": auto-reproduce
-        # hasta el primer punto. Sin breakpoints, paso a paso clásico.
-        self._run_mode = "continue" if self._breakpoints else "step"
+        # Modo de arranque según los puntos ALCANZABLES: los que quedan
+        # antes de start_idx o están sobre pasos desactivados no dispararían
+        # nunca, y sin este filtro la sesión se auto-reproducía entera.
+        from core.debug_marks import decidir_run_mode
+        self._run_mode = decidir_run_mode(
+            self._breakpoints, start_idx, macro.pasos,
+        )
         # ¿Estamos parados esperando al usuario? Grabar/avanzar/atrás solo
         # tienen sentido en pausa (si no, se leería un step_index en
         # movimiento y se mutaría macro.pasos a mitad de iteración).
-        self._en_pausa = not self._breakpoints  # sin bp: pausa desde el paso 1
+        self._en_pausa = (self._run_mode == "step")  # en 'step' se pausa ya
 
         self.setObjectName("StepRoot")
         self.setWindowFlags(
@@ -217,7 +232,7 @@ class StepThroughPanel(QWidget):
         self.skip_btn.setToolTip("Saltar este paso SIN ejecutarlo")
         self.skip_btn.clicked.connect(self._on_skip)
         btns2.addWidget(self.skip_btn)
-        self.repeat_btn = QPushButton("🔁 F5")
+        self.repeat_btn = QPushButton("🔁 F12")
         self.repeat_btn.setObjectName("repeat")
         self.repeat_btn.setToolTip("Repetir este paso sin avanzar (para afinarlo)")
         self.repeat_btn.clicked.connect(self._on_repeat)
@@ -317,16 +332,36 @@ class StepThroughPanel(QWidget):
             _pynput_keyboard.Key.f6: "continue",
             _pynput_keyboard.Key.f9: "stop",
             _pynput_keyboard.Key.f4: "skip",
-            _pynput_keyboard.Key.f5: "repeat",
+            _pynput_keyboard.Key.f12: "repeat",
         }
 
+        # Modificadores cuya presencia significa que la tecla es un atajo
+        # del SISTEMA o de la app (Alt+F4 para cerrar, Ctrl+F5...), no
+        # nuestro. Sin esto, un Alt+F4 en la app depurada disparaba además
+        # "saltar paso".
+        K = _pynput_keyboard.Key
+        mods = {K.alt, K.alt_l, K.alt_r, K.alt_gr,
+                K.ctrl, K.ctrl_l, K.ctrl_r,
+                K.cmd, K.cmd_l, K.cmd_r}
+        self._mods_pulsados = set()
+
         def on_press(key):
+            if key in mods:
+                self._mods_pulsados.add(key)
+                return
+            if self._mods_pulsados:
+                return  # es un atajo con modificador: no es para nosotros
             nombre = acciones.get(key)
             if nombre is not None:
                 self._hotkey.emit(nombre)
 
+        def on_release(key):
+            self._mods_pulsados.discard(key)
+
         try:
-            self._kb_listener = _pynput_keyboard.Listener(on_press=on_press)
+            self._kb_listener = _pynput_keyboard.Listener(
+                on_press=on_press, on_release=on_release,
+            )
             self._kb_listener.start()
         except Exception:
             self._kb_listener = None
@@ -368,7 +403,8 @@ class StepThroughPanel(QWidget):
         """Habilita grabar/atrás/siguiente solo cuando estamos parados.
         Continuar y parar están siempre disponibles."""
         self._en_pausa = en_pausa
-        for b in (self.back_btn, self.next_btn, self.record_btn):
+        for b in (self.back_btn, self.next_btn, self.record_btn,
+                  self.skip_btn, self.repeat_btn, self.edit_btn):
             b.setEnabled(en_pausa)
 
     def _on_step_status(self, status: RunStatus):
@@ -452,7 +488,18 @@ class StepThroughPanel(QWidget):
         )
 
     def _main_window(self):
-        """Ventana principal de MemoviPro (a través del editor padre)."""
+        """Ventana principal de MemoviPro.
+
+        Primero por el padre real (el StepEditor que nos creó); el escaneo
+        por nombre de clase queda como último recurso."""
+        owner = getattr(self, "_owner", None)
+        if owner is not None:
+            try:
+                w = owner.window()
+                if w is not None:
+                    return w
+            except Exception:
+                pass
         try:
             from PyQt6.QtWidgets import QApplication
             for w in QApplication.topLevelWidgets():
@@ -490,8 +537,10 @@ class StepThroughPanel(QWidget):
         self.action_label.setText("<i>Detenido</i>")
 
     def _on_record_here(self):
-        """Pausa el step-through y abre el grabador. Los pasos
-        capturados se insertan en la macro JUSTO DESPUÉS del paso actual."""
+        """Pausa el step-through y abre el grabador.
+
+        Al terminar se elige qué hacer con lo capturado: insertar antes,
+        insertar después o reemplazar N pasos (ver _integrar_grabacion)."""
         if self._runner is None or self._runner.player is None:
             QMessageBox.information(self, "Aún no", "Pulsa primero ▶ Siguiente al menos una vez.")
             return
@@ -526,6 +575,7 @@ class StepThroughPanel(QWidget):
         from core.debug_marks import shift_on_insert, shift_on_remove
 
         n = len(nuevos)
+        puntero_a = None   # a dónde llevar el puntero al terminar
         msg = QMessageBox(self)
         msg.setWindowTitle("Pasos grabados")
         msg.setText(f"Se han capturado {n} paso(s) nuevo(s).")
@@ -539,22 +589,34 @@ class StepThroughPanel(QWidget):
         msg.exec()
         clic = msg.clickedButton()
 
+        def _insertar(pos: int, cuantos_borrar: int = 0):
+            """Aplica el cambio a la macro y desplaza AMBOS conjuntos de
+            breakpoints (los del usuario y los temporales de la sesión)."""
+            if cuantos_borrar:
+                del self.macro.pasos[pos:pos + cuantos_borrar]
+                for _ in range(cuantos_borrar):
+                    self._breakpoints = shift_on_remove(self._breakpoints, pos)
+                    self._bp_temporales = shift_on_remove(self._bp_temporales, pos)
+            self.macro.pasos[pos:pos] = nuevos
+            self._breakpoints = shift_on_insert(self._breakpoints, pos, n)
+            self._bp_temporales = shift_on_insert(self._bp_temporales, pos, n)
+
+        # Nota de semántica: los pasos grabados ya los acabas de hacer a
+        # mano sobre la aplicación, así que al insertarlos ANTES o al
+        # REEMPLAZAR dejamos el puntero DESPUÉS de ellos — no se
+        # re-ejecutan. En "DESPUÉS" el paso actual aún no ha corrido, así
+        # que se ejecuta él y luego los nuevos (es lo que pides al elegir
+        # esa opción).
         if clic is b_desp:
-            insert_at = idx_actual + 1
-            self.macro.pasos[insert_at:insert_at] = nuevos
-            self._breakpoints = shift_on_insert(self._breakpoints, insert_at, n)
+            _insertar(idx_actual + 1)
+            puntero_a = None       # el paso actual aún debe ejecutarse
             texto = f"➕ {n} paso(s) insertados DESPUÉS del {idx_actual + 1}."
         elif clic is b_antes:
-            insert_at = idx_actual
-            self.macro.pasos[insert_at:insert_at] = nuevos
-            self._breakpoints = shift_on_insert(self._breakpoints, insert_at, n)
-            # El puntero se queda en `insert_at`, que ahora es el PRIMER
-            # paso nuevo: así se ejecutan los recién grabados y después el
-            # original. mover_puntero fuerza al bucle a re-leer el paso
-            # (había capturado el viejo antes de pausarse).
-            if self._runner and self._runner.player:
-                self._runner.player.mover_puntero(insert_at)
-            texto = f"➕ {n} paso(s) insertados ANTES del {idx_actual + 1}."
+            _insertar(idx_actual)
+            # Puntero al paso original, que ahora está n posiciones abajo.
+            puntero_a = idx_actual + n
+            texto = (f"➕ {n} paso(s) insertados ANTES del {idx_actual + 1} "
+                     "(no se repiten: ya los hiciste al grabar).")
         elif clic is b_reemp:
             restantes = len(self.macro.pasos) - idx_actual
             cuantos, ok = QInputDialog.getInt(
@@ -565,23 +627,22 @@ class StepThroughPanel(QWidget):
             )
             if not ok:
                 return
-            # Borrar los `cuantos` pasos y colocar los nuevos en su sitio.
-            del self.macro.pasos[idx_actual:idx_actual + cuantos]
-            for _ in range(cuantos):
-                self._breakpoints = shift_on_remove(self._breakpoints, idx_actual)
-            self.macro.pasos[idx_actual:idx_actual] = nuevos
-            self._breakpoints = shift_on_insert(self._breakpoints, idx_actual, n)
-            # Re-leer: el bucle tenía capturado uno de los pasos que
-            # acabamos de BORRAR; sin esto lo ejecutaría igualmente.
-            if self._runner and self._runner.player:
-                self._runner.player.mover_puntero(idx_actual)
+            _insertar(idx_actual, cuantos_borrar=cuantos)
+            # Puntero DESPUÉS de los nuevos: el paso viejo ya no existe y
+            # los nuevos ya los hiciste al grabar.
+            puntero_a = idx_actual + n
             texto = (f"♻️ {cuantos} paso(s) reemplazados por {n} nuevo(s) "
                      f"desde el {idx_actual + 1}.")
         else:
             return  # cancelado
 
+        # OJO al orden: publicar los breakpoints nuevos ANTES de mover el
+        # puntero, porque mover_puntero despierta al hilo del player y este
+        # re-evaluaría la pausa con el conjunto viejo.
         if self._runner and self._runner.player:
             self._runner.player.set_breakpoints(self._breakpoints)
+        if puntero_a is not None and self._runner and self._runner.player:
+            self._runner.player.mover_puntero(puntero_a)
         if self.on_macro_modified:
             self.on_macro_modified()
         self.action_label.setText(f"<b>{texto}</b> Pulsa ▶ F8 para seguir.")
@@ -590,9 +651,9 @@ class StepThroughPanel(QWidget):
         self.action_label.setText(
             f"<b>✓ Fin</b> · {summary.ok} OK · {summary.ko} KO"
         )
-        self.next_btn.setEnabled(False)
-        self.cont_btn.setEnabled(False)
-        self.record_btn.setEnabled(False)
+        for b in (self.next_btn, self.cont_btn, self.record_btn,
+                  self.back_btn, self.skip_btn, self.repeat_btn, self.edit_btn):
+            b.setEnabled(False)
         self.bp_label.setVisible(False)
         self._stop_hotkeys()
         self.finished.emit()
