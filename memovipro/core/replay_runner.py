@@ -97,6 +97,16 @@ class ReplayRunner:
         if self._player:
             self._player.continue_run()
 
+    def skip_step(self) -> None:
+        """Salta el paso actual sin ejecutarlo."""
+        if self._player:
+            self._player.skip_step()
+
+    def repeat_step(self) -> None:
+        """Repite el paso actual sin avanzar el puntero."""
+        if self._player:
+            self._player.repeat_step()
+
     def step_back(self) -> None:
         """En modo step-through, retrocede el puntero un paso."""
         if self._player:

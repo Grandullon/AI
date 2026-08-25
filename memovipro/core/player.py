@@ -107,6 +107,9 @@ class Player:
         # paso (para revisar / reejecutar). Lo activa step_back() y lo
         # consume el loop tras despertar de _esperar_step().
         self._step_back_flag: bool = False
+        # Saltar el paso actual sin ejecutarlo / repetirlo sin avanzar.
+        self._skip_flag: bool = False
+        self._repeat_flag: bool = False
         # Puntos de análisis (breakpoints, 0-based) y modo de ejecución
         # dentro del step-through:
         #   - "step": pausa ANTES de cada paso (paso a paso clásico).
@@ -143,6 +146,30 @@ class Player:
         """Avanza UN paso y vuelve a pausar (modo paso a paso)."""
         self._run_mode = "step"
         self._step_back_flag = False
+        self._skip_flag = False
+        self._repeat_flag = False
+        self._step_continue.set()
+
+    def skip_step(self) -> None:
+        """Salta el paso actual SIN ejecutarlo y pausa en el siguiente.
+
+        Útil cuando el usuario ya hizo esa acción a mano mientras depuraba
+        y no quiere que se repita."""
+        self._run_mode = "step"
+        self._step_back_flag = False
+        self._repeat_flag = False
+        self._skip_flag = True
+        self._step_continue.set()
+
+    def repeat_step(self) -> None:
+        """Ejecuta el paso actual otra vez SIN avanzar el puntero.
+
+        Permite afinar un paso que falla (cambiar el selector, mover la
+        ventana...) y volver a probarlo tantas veces como haga falta."""
+        self._run_mode = "step"
+        self._step_back_flag = False
+        self._skip_flag = False
+        self._repeat_flag = True
         self._step_continue.set()
 
     def continue_run(self) -> None:
@@ -153,6 +180,12 @@ class Player:
         self._step_back_flag = False
         self._step_continue.set()
 
+    def _reset_flags_navegacion(self) -> None:
+        """Limpia los flags de navegación del paso a paso."""
+        self._step_back_flag = False
+        self._skip_flag = False
+        self._repeat_flag = False
+
     def step_back(self) -> None:
         """En modo step-through, retrocede el puntero un paso.
 
@@ -161,6 +194,8 @@ class Player:
         reejecutarlo con el siguiente ▶. Despierta el wait igual que
         advance_step(), marcando la intención de retroceder."""
         self._run_mode = "step"
+        self._skip_flag = False
+        self._repeat_flag = False
         self._step_back_flag = True
         self._step_continue.set()
 
@@ -184,6 +219,14 @@ class Player:
     def step_index(self) -> int:
         """Índice del paso actualmente apuntado (0-based)."""
         return self._step_idx
+
+    def mover_puntero(self, idx: int) -> None:
+        """Reposiciona el puntero del paso a paso (0-based).
+
+        Lo usa la UI cuando inserta pasos ANTES del actual: el paso en el
+        que estábamos parados se desplaza hacia abajo y el puntero debe
+        seguirlo para no re-ejecutar los recién insertados."""
+        self._step_idx = max(0, int(idx))
 
     def _esperar_si_pausado(self) -> None:
         """Bloquea (con tramos cortos) mientras esté pausado."""
@@ -264,6 +307,12 @@ class Player:
                 paso = self.macro.pasos[idx]
                 if self._abort.is_set():
                     break
+                # Paso desactivado por el usuario: saltarlo sin ejecutarlo
+                # ni anunciarlo (no existe para la reproducción).
+                if not paso.activo:
+                    logger.debug("Paso {} desactivado — saltado", idx + 1)
+                    self._step_idx += 1
+                    continue
                 # Esperar si está en pausa.
                 self._esperar_si_pausado()
                 if self._abort.is_set():
@@ -298,6 +347,12 @@ class Player:
                     if self._step_back_flag:
                         self._step_back_flag = False
                         self._step_idx = max(self._start_idx, idx - 1)
+                        continue
+                    # Saltar: avanzar el puntero SIN ejecutar este paso.
+                    if self._skip_flag:
+                        self._skip_flag = False
+                        logger.info("Paso {} saltado por el usuario", idx + 1)
+                        self._step_idx += 1
                         continue
                 # Control de flujo: IF_VENTANA decide cuántos pasos avanzar
                 # (ejecutar el bloque "then" o saltarlo). No es una acción
@@ -373,6 +428,13 @@ class Player:
                             incidencias.append(inc)
                             return False, incidencias
 
+                # Repetir: el paso se acaba de ejecutar, pero NO avanzamos
+                # el puntero → el bucle vuelve a pausar en el mismo paso y
+                # el usuario puede probarlo las veces que haga falta.
+                if self._repeat_flag:
+                    self._repeat_flag = False
+                    logger.info("Paso {} repetido (sin avanzar)", idx + 1)
+                    continue
                 # Avanzar al siguiente paso (si durante la ejecución se
                 # insertaron pasos en macro.pasos en posición idx+1, el
                 # bucle los recogerá automáticamente).

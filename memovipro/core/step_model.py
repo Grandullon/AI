@@ -69,6 +69,10 @@ class Step:
     # como fallido → incidencia clara en vez de fallo en cascada.
     verificar_ventana: str = ""
     verificar_timeout_s: float = 10.0
+    # Paso desactivado: se salta en la reproducción sin borrarlo de la
+    # macro (útil para probar sin un paso concreto). Ausente en el YAML =
+    # activo, así que las macros existentes no cambian.
+    activo: bool = True
     # Verificación de TEXTO post-paso: tras ejecutar, leer el texto del
     # control objetivo (su selector, o la ventana principal) y comprobar
     # que contiene esta cadena (comparación laxa: sin acentos/mayúsculas).
@@ -101,6 +105,8 @@ class Step:
             # serializamos aparte si no está ya escrito por verificar_ventana.
             if self.verificar_timeout_s != 10.0 and not self.verificar_ventana:
                 d["verificar_timeout_s"] = self.verificar_timeout_s
+        if not self.activo:
+            d["activo"] = False
         if self.descripcion:
             d["descripcion"] = self.descripcion
         if self.extra:
@@ -124,6 +130,7 @@ class Step:
             delay_before_s=float(d.get("delay_before_s", 0.0)),
             verificar_ventana=d.get("verificar_ventana", ""),
             verificar_timeout_s=float(d.get("verificar_timeout_s", 10.0)),
+            activo=bool(d.get("activo", True)),
             verificar_texto=d.get("verificar_texto", ""),
         )
 
@@ -366,4 +373,5 @@ def render_step(step: Step, ctx: dict[str, str]) -> Step:
         verificar_ventana=render_placeholders(step.verificar_ventana, ctx) if step.verificar_ventana else "",
         verificar_timeout_s=step.verificar_timeout_s,
         verificar_texto=render_placeholders(step.verificar_texto, ctx) if step.verificar_texto else "",
+        activo=step.activo,
     )

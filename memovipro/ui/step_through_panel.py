@@ -25,6 +25,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -72,6 +73,12 @@ QPushButton#back { background-color: #2c3e50; border-color: #1a252f; }
 QPushButton#back:hover { background-color: #34495e; }
 QPushButton#cont { background-color: #2980b9; border-color: #1f618d; font-weight: bold; }
 QPushButton#cont:hover { background-color: #3498db; }
+QPushButton#skip { background-color: #7f8c8d; border-color: #616a6b; }
+QPushButton#skip:hover { background-color: #95a5a6; }
+QPushButton#repeat { background-color: #8e44ad; border-color: #6c3483; }
+QPushButton#repeat:hover { background-color: #9b59b6; }
+QPushButton#edit { background-color: #16a085; border-color: #117a65; }
+QPushButton#edit:hover { background-color: #1abc9c; }
 QLabel#bp { color: #f1c40f; font-size: 11px; font-weight: bold; }
 """
 
@@ -116,6 +123,7 @@ class StepThroughPanel(QWidget):
         on_macro_modified: Callable[[], None] | None = None,
         on_step_changed: Callable[[int], None] | None = None,
         breakpoints: set[int] | None = None,
+        start_idx: int = 0,
         parent=None,
     ):
         super().__init__(parent=None)  # top-level
@@ -194,18 +202,42 @@ class StepThroughPanel(QWidget):
         self.cont_btn.setToolTip("Continuar hasta el siguiente punto de análisis")
         self.cont_btn.clicked.connect(self._on_continue)
         btns.addWidget(self.cont_btn)
-        self.record_btn = QPushButton("🔴 Grabar")
-        self.record_btn.setObjectName("record")
-        self.record_btn.clicked.connect(self._on_record_here)
-        btns.addWidget(self.record_btn)
         self.stop_btn = QPushButton("⏹ F9")
         self.stop_btn.setObjectName("stop")
         self.stop_btn.clicked.connect(self._on_stop)
         btns.addWidget(self.stop_btn)
         layout.addLayout(btns)
+
+        # Segunda fila: herramientas de edición en el punto de parada.
+        btns2 = QHBoxLayout()
+        btns2.setContentsMargins(0, 4, 0, 0)
+        btns2.setSpacing(6)
+        self.skip_btn = QPushButton("⏭ F4")
+        self.skip_btn.setObjectName("skip")
+        self.skip_btn.setToolTip("Saltar este paso SIN ejecutarlo")
+        self.skip_btn.clicked.connect(self._on_skip)
+        btns2.addWidget(self.skip_btn)
+        self.repeat_btn = QPushButton("🔁 F5")
+        self.repeat_btn.setObjectName("repeat")
+        self.repeat_btn.setToolTip("Repetir este paso sin avanzar (para afinarlo)")
+        self.repeat_btn.clicked.connect(self._on_repeat)
+        btns2.addWidget(self.repeat_btn)
+        self.record_btn = QPushButton("🔴 Grabar")
+        self.record_btn.setObjectName("record")
+        self.record_btn.setToolTip("Grabar pasos: insertar antes/después o reemplazar")
+        self.record_btn.clicked.connect(self._on_record_here)
+        btns2.addWidget(self.record_btn)
+        self.edit_btn = QPushButton("✏️ Editar")
+        self.edit_btn.setObjectName("edit")
+        self.edit_btn.setToolTip("Abrir MemoviPro para editar la tabla sin perder la sesión")
+        self.edit_btn.clicked.connect(self._on_edit_here)
+        btns2.addWidget(self.edit_btn)
+        layout.addLayout(btns2)
+
         # Estado inicial: si arrancamos auto-reproduciendo (hay breakpoints),
-        # grabar/atrás/siguiente empiezan deshabilitados hasta la 1ª pausa.
-        for b in (self.back_btn, self.next_btn, self.record_btn):
+        # las acciones de edición empiezan deshabilitadas hasta la 1ª pausa.
+        for b in (self.back_btn, self.next_btn, self.record_btn,
+                  self.skip_btn, self.repeat_btn, self.edit_btn):
             b.setEnabled(self._en_pausa)
 
         # Atajos LOCALES de Qt (solo con MemoviPro enfocado). Los GLOBALES
@@ -229,6 +261,7 @@ class StepThroughPanel(QWidget):
             step_mode=True,
             breakpoints=self._breakpoints,
             run_mode=self._run_mode,
+            start_idx=start_idx,
         )
         self._thread = _StepThroughThread(self._runner)
         self._thread.step_status.connect(self._on_step_status)
@@ -263,6 +296,8 @@ class StepThroughPanel(QWidget):
             "back": self._on_back,
             "continue": self._on_continue,
             "stop": self._on_stop,
+            "skip": self._on_skip,
+            "repeat": self._on_repeat,
         }.get(nombre, lambda: None)()
 
     def _start_hotkeys(self):
@@ -281,6 +316,8 @@ class StepThroughPanel(QWidget):
             _pynput_keyboard.Key.f7: "back",
             _pynput_keyboard.Key.f6: "continue",
             _pynput_keyboard.Key.f9: "stop",
+            _pynput_keyboard.Key.f4: "skip",
+            _pynput_keyboard.Key.f5: "repeat",
         }
 
         def on_press(key):
@@ -368,6 +405,7 @@ class StepThroughPanel(QWidget):
         # sentido y leería un estado en movimiento.
         if self._runner is None or not self._en_pausa:
             return
+        self._minimizar_principal()
         self._runner.advance_step()
 
     def _on_continue(self):
@@ -375,7 +413,66 @@ class StepThroughPanel(QWidget):
         if self._runner is None or not self._en_pausa:
             return
         self.bp_label.setVisible(False)
+        self._minimizar_principal()
         self._runner.continue_run()
+
+    def _on_skip(self):
+        """Salta este paso SIN ejecutarlo (ya lo hiciste a mano)."""
+        if self._runner is None or not self._en_pausa:
+            return
+        self._minimizar_principal()
+        self._runner.skip_step()
+
+    def _on_repeat(self):
+        """Repite este paso sin avanzar, para afinarlo."""
+        if self._runner is None or not self._en_pausa:
+            return
+        self._minimizar_principal()
+        self._runner.repeat_step()
+
+    def _on_edit_here(self):
+        """Restaura MemoviPro para editar la tabla sin cerrar la sesión.
+
+        La sesión sigue pausada en el paso actual: cuando el usuario pulse
+        ▶/⏭/🔁, la ventana principal se vuelve a minimizar sola."""
+        if self._runner is None or not self._en_pausa:
+            return
+        main = self._main_window()
+        if main is not None:
+            try:
+                main.showNormal()
+                main.raise_()
+                main.activateWindow()
+            except Exception:
+                pass
+        self.raise_()  # el panel debe seguir visible por encima
+        self.action_label.setText(
+            "<b>✏️ Edición</b> — cambia lo que necesites en la tabla y "
+            "pulsa <b>▶ F8</b> (o 🔁 F5) para seguir."
+        )
+
+    def _main_window(self):
+        """Ventana principal de MemoviPro (a través del editor padre)."""
+        try:
+            from PyQt6.QtWidgets import QApplication
+            for w in QApplication.topLevelWidgets():
+                if w.__class__.__name__ == "MainWindow":
+                    return w
+        except Exception:
+            pass
+        return None
+
+    def _minimizar_principal(self):
+        """Vuelve a minimizar MemoviPro si el usuario lo restauró con
+        ✏️ Editar (para no estorbar a la app que se automatiza)."""
+        main = self._main_window()
+        if main is None:
+            return
+        try:
+            if not main.isMinimized():
+                main.showMinimized()
+        except Exception:
+            pass
 
     def _on_back(self):
         """Retrocede el puntero un paso (para revisar / reejecutar).
@@ -384,6 +481,7 @@ class StepThroughPanel(QWidget):
         anterior; el siguiente ▶ lo volverá a ejecutar."""
         if self._runner is None or not self._en_pausa:
             return
+        self._minimizar_principal()
         self._runner.step_back()
 
     def _on_stop(self):
@@ -412,23 +510,75 @@ class StepThroughPanel(QWidget):
         dlg = RecordDialog(parent=self)
         result = dlg.exec()
         if result and dlg.macro is not None and dlg.macro.pasos:
-            nuevos = list(dlg.macro.pasos)
-            insert_at = idx_actual + 1
-            self.macro.pasos[insert_at:insert_at] = nuevos
-            # Desplazar los breakpoints que estaban en/tras el punto de
-            # inserción: sus índices se corren `len(nuevos)` posiciones.
-            from core.debug_marks import shift_on_insert
-            self._breakpoints = shift_on_insert(self._breakpoints, insert_at, len(nuevos))
-            if self._runner and self._runner.player:
-                self._runner.player.set_breakpoints(self._breakpoints)
-            if self.on_macro_modified:
-                self.on_macro_modified()
-            self.action_label.setText(
-                f"<b>{insert_at + 1}.</b> ➕ Insertados {len(nuevos)} pasos "
-                "nuevos justo después del paso actual. Pulsa F8/▶."
-            )
+            self._integrar_grabacion(list(dlg.macro.pasos), idx_actual)
         # Reanudar las teclas globales tras la grabación.
         self._start_hotkeys()
+
+    def _integrar_grabacion(self, nuevos: list, idx_actual: int) -> None:
+        """Pregunta QUÉ hacer con los pasos grabados e integra en la macro.
+
+        Tres opciones (lo que faltaba: antes de esto solo se insertaba
+        después):
+          - Insertar DESPUÉS del paso actual
+          - Insertar ANTES del paso actual
+          - REEMPLAZAR N pasos a partir del actual
+        """
+        from core.debug_marks import shift_on_insert, shift_on_remove
+
+        n = len(nuevos)
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Pasos grabados")
+        msg.setText(f"Se han capturado {n} paso(s) nuevo(s).")
+        msg.setInformativeText(
+            f"Estás parado en el paso {idx_actual + 1}. ¿Dónde los pongo?"
+        )
+        b_desp = msg.addButton("Insertar DESPUÉS", QMessageBox.ButtonRole.AcceptRole)
+        b_antes = msg.addButton("Insertar ANTES", QMessageBox.ButtonRole.AcceptRole)
+        b_reemp = msg.addButton("REEMPLAZAR pasos…", QMessageBox.ButtonRole.DestructiveRole)
+        msg.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
+        msg.exec()
+        clic = msg.clickedButton()
+
+        if clic is b_desp:
+            insert_at = idx_actual + 1
+            self.macro.pasos[insert_at:insert_at] = nuevos
+            self._breakpoints = shift_on_insert(self._breakpoints, insert_at, n)
+            texto = f"➕ {n} paso(s) insertados DESPUÉS del {idx_actual + 1}."
+        elif clic is b_antes:
+            insert_at = idx_actual
+            self.macro.pasos[insert_at:insert_at] = nuevos
+            self._breakpoints = shift_on_insert(self._breakpoints, insert_at, n)
+            # El puntero debe seguir apuntando al paso original, que ahora
+            # está n posiciones más abajo.
+            if self._runner and self._runner.player:
+                self._runner.player.mover_puntero(idx_actual + n)
+            texto = f"➕ {n} paso(s) insertados ANTES del {idx_actual + 1}."
+        elif clic is b_reemp:
+            restantes = len(self.macro.pasos) - idx_actual
+            cuantos, ok = QInputDialog.getInt(
+                self, "Reemplazar pasos",
+                f"¿Cuántos pasos reemplazo a partir del {idx_actual + 1}?\n"
+                f"(se borrarán y en su lugar irán los {n} grabados)",
+                1, 1, max(1, restantes),
+            )
+            if not ok:
+                return
+            # Borrar los `cuantos` pasos y colocar los nuevos en su sitio.
+            del self.macro.pasos[idx_actual:idx_actual + cuantos]
+            for _ in range(cuantos):
+                self._breakpoints = shift_on_remove(self._breakpoints, idx_actual)
+            self.macro.pasos[idx_actual:idx_actual] = nuevos
+            self._breakpoints = shift_on_insert(self._breakpoints, idx_actual, n)
+            texto = (f"♻️ {cuantos} paso(s) reemplazados por {n} nuevo(s) "
+                     f"desde el {idx_actual + 1}.")
+        else:
+            return  # cancelado
+
+        if self._runner and self._runner.player:
+            self._runner.player.set_breakpoints(self._breakpoints)
+        if self.on_macro_modified:
+            self.on_macro_modified()
+        self.action_label.setText(f"<b>{texto}</b> Pulsa ▶ F8 para seguir.")
 
     def _on_finished(self, summary: ReplaySummary):
         self.action_label.setText(

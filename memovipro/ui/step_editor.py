@@ -108,6 +108,7 @@ class StepEditor(QWidget):
             ("Inspector", self._launch_inspector, None),
             ("⚡ Plantilla arranque", self._insertar_plantilla_arranque, "#8e44ad"),
             ("🔴 Punto análisis", self._toggle_breakpoint, "#7f2d2d"),
+            ("⏸ Activar/Desactivar", self._toggle_activo, "#7f8c8d"),
             ("🐞 Paso a paso", self._launch_step_through, "#16a085"),
             ("▶ Hasta aquí", self._run_hasta_aqui, "#2980b9"),
             ("▶ Desde aquí", self._run_desde_aqui, "#2980b9"),
@@ -160,6 +161,14 @@ class StepEditor(QWidget):
                 item = QTableWidgetItem(v)
                 if col == 0:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                if not paso.activo:
+                    # Paso desactivado: gris y tachado, para que se vea de
+                    # un vistazo que la reproducción lo va a saltar.
+                    from PyQt6.QtGui import QColor
+                    f = item.font()
+                    f.setStrikeOut(True)
+                    item.setFont(f)
+                    item.setForeground(QColor("#95a5a6"))
                 self.tabla.setItem(i, col, item)
         # Re-aplicar highlight si había uno y sigue siendo válido
         if 0 <= hl < self.tabla.rowCount():
@@ -592,6 +601,23 @@ class StepEditor(QWidget):
         self._refresh_table()
         self.tabla.selectRow(row)
 
+    def _toggle_activo(self):
+        """Activa/desactiva el paso seleccionado (sin borrarlo).
+
+        Un paso desactivado se salta al reproducir — útil para probar sin
+        él. Se marca en la tabla y se guarda como `activo: false`."""
+        row = self.tabla.currentRow()
+        if row < 0:
+            QMessageBox.information(
+                self, "Selecciona un paso",
+                "Pincha la fila que quieres activar o desactivar.",
+            )
+            return
+        paso = self.macro.pasos[row]
+        paso.activo = not paso.activo
+        self._refresh_table()
+        self.tabla.selectRow(row)
+
     def _on_step_through_macro_modified(self):
         """El step-through insertó pasos: sincronizamos los breakpoints
         (que el panel ha desplazado) de vuelta al editor y refrescamos."""
@@ -601,13 +627,31 @@ class StepEditor(QWidget):
         self._refresh_table()
 
     def _launch_step_through(self):
-        """Lanza el depurador paso a paso (step-through) sobre la macro.
+        """Lanza el depurador paso a paso sobre la macro.
 
-        Abre un panel flotante con la info del paso actual y botones
-        ▶ Siguiente / 🔴 Grabar aquí / ⏹. Minimiza MemoviPro mientras
-        dura. Si el usuario inserta pasos nuevos con "Grabar aquí",
-        se añaden a la macro en posición idx+1 y la tabla se refresca.
+        Si hay una fila seleccionada (que no sea la primera), pregunta si
+        empezar desde el principio o DESDE ese paso — útil cuando la app
+        ya está en ese punto y no quieres repetir todo lo anterior.
         """
+        row = self.tabla.currentRow()
+        start_idx = 0
+        if row > 0:
+            items = [
+                "Desde el principio (paso 1)",
+                f"Desde el paso {row + 1} (la app ya está en ese punto)",
+            ]
+            elegido, ok = QInputDialog.getItem(
+                self, "¿Desde dónde?", "Empezar el paso a paso:", items, 0, False,
+            )
+            if not ok:
+                return
+            if elegido == items[1]:
+                start_idx = row
+        self._arrancar_step_through(start_idx=start_idx)
+
+    def _arrancar_step_through(self, start_idx: int = 0,
+                               breakpoints_extra: set | None = None):
+        """Motor común para lanzar el panel de paso a paso."""
         self._sync_from_form()
         if not self.macro.pasos:
             QMessageBox.warning(self, "Macro vacía", "Añade o graba pasos antes de usar paso a paso.")
@@ -622,6 +666,9 @@ class StepEditor(QWidget):
 
         # Solo breakpoints dentro del rango actual de pasos.
         bps = {b for b in self._breakpoints if 0 <= b < len(self.macro.pasos)}
+        if breakpoints_extra:
+            bps = bps | {b for b in breakpoints_extra
+                         if 0 <= b < len(self.macro.pasos)}
         from .step_through_panel import StepThroughPanel
         self._step_panel = StepThroughPanel(
             macro=self.macro,
@@ -630,6 +677,7 @@ class StepEditor(QWidget):
             on_macro_modified=self._on_step_through_macro_modified,
             on_step_changed=self.highlight_step,
             breakpoints=bps,
+            start_idx=start_idx,
             parent=self,
         )
         self._step_panel.finished.connect(self._on_step_through_finished)
@@ -667,8 +715,11 @@ class StepEditor(QWidget):
             QMessageBox.information(self, "Selecciona un paso",
                                     "Pincha la fila hasta la que quieres ejecutar.")
             return
-        self._run_range(start_idx=0, stop_after_idx=row,
-                        etiqueta=f"Hasta el paso {row + 1}")
+        # Se reproduce sola hasta ese paso y SE QUEDA AHÍ EN PAUSA, dentro
+        # de la sesión de depuración: así puedes grabar/insertar/saltar en
+        # ese punto. (Antes terminaba la ejecución y había que empezar de
+        # cero con el paso a paso para poder editar.)
+        self._arrancar_step_through(start_idx=0, breakpoints_extra={row})
 
     def _run_desde_aqui(self):
         """Ejecuta la macro desde el paso seleccionado hasta el final.
