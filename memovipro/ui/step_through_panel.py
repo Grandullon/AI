@@ -548,10 +548,12 @@ class StepThroughPanel(QWidget):
             insert_at = idx_actual
             self.macro.pasos[insert_at:insert_at] = nuevos
             self._breakpoints = shift_on_insert(self._breakpoints, insert_at, n)
-            # El puntero debe seguir apuntando al paso original, que ahora
-            # está n posiciones más abajo.
+            # El puntero se queda en `insert_at`, que ahora es el PRIMER
+            # paso nuevo: así se ejecutan los recién grabados y después el
+            # original. mover_puntero fuerza al bucle a re-leer el paso
+            # (había capturado el viejo antes de pausarse).
             if self._runner and self._runner.player:
-                self._runner.player.mover_puntero(idx_actual + n)
+                self._runner.player.mover_puntero(insert_at)
             texto = f"➕ {n} paso(s) insertados ANTES del {idx_actual + 1}."
         elif clic is b_reemp:
             restantes = len(self.macro.pasos) - idx_actual
@@ -569,6 +571,10 @@ class StepThroughPanel(QWidget):
                 self._breakpoints = shift_on_remove(self._breakpoints, idx_actual)
             self.macro.pasos[idx_actual:idx_actual] = nuevos
             self._breakpoints = shift_on_insert(self._breakpoints, idx_actual, n)
+            # Re-leer: el bucle tenía capturado uno de los pasos que
+            # acabamos de BORRAR; sin esto lo ejecutaría igualmente.
+            if self._runner and self._runner.player:
+                self._runner.player.mover_puntero(idx_actual)
             texto = (f"♻️ {cuantos} paso(s) reemplazados por {n} nuevo(s) "
                      f"desde el {idx_actual + 1}.")
         else:

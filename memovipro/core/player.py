@@ -110,6 +110,9 @@ class Player:
         # Saltar el paso actual sin ejecutarlo / repetirlo sin avanzar.
         self._skip_flag: bool = False
         self._repeat_flag: bool = False
+        # La UI modificó macro.pasos durante la pausa: hay que re-leer el
+        # paso actual en vez de ejecutar el que se capturó antes.
+        self._recargar_flag: bool = False
         # Puntos de análisis (breakpoints, 0-based) y modo de ejecución
         # dentro del step-through:
         #   - "step": pausa ANTES de cada paso (paso a paso clásico).
@@ -221,12 +224,20 @@ class Player:
         return self._step_idx
 
     def mover_puntero(self, idx: int) -> None:
-        """Reposiciona el puntero del paso a paso (0-based).
+        """Reposiciona el puntero del paso a paso y RECARGA el paso actual.
 
-        Lo usa la UI cuando inserta pasos ANTES del actual: el paso en el
-        que estábamos parados se desplaza hacia abajo y el puntero debe
-        seguirlo para no re-ejecutar los recién insertados."""
+        Imprescindible cuando la UI modifica `macro.pasos` durante una
+        pausa (insertar antes / reemplazar): el bucle capturó el paso
+        ANTES de pausarse, así que sin recargar ejecutaría el paso viejo
+        (en "reemplazar", uno que el usuario acaba de borrar) y se
+        saltaría los recién insertados.
+
+        Despierta el wait con `_recargar_flag`: el bucle vuelve arriba sin
+        ejecutar nada, re-lee `macro.pasos[_step_idx]` y se vuelve a
+        pausar mostrando el paso correcto."""
         self._step_idx = max(0, int(idx))
+        self._recargar_flag = True
+        self._step_continue.set()
 
     def _esperar_si_pausado(self) -> None:
         """Bloquea (con tramos cortos) mientras esté pausado."""
@@ -344,6 +355,12 @@ class Player:
                     # Step-back: el usuario pidió retroceder. Re-apuntamos al
                     # paso anterior (sin ejecutar el actual) y volvemos a
                     # esperar; la UI mostrará el paso previo resaltado.
+                    # La macro cambió durante la pausa (insertar/reemplazar):
+                    # volver arriba SIN ejecutar, para re-leer el paso que
+                    # ahora ocupa la posición del puntero.
+                    if self._recargar_flag:
+                        self._recargar_flag = False
+                        continue
                     if self._step_back_flag:
                         self._step_back_flag = False
                         self._step_idx = max(self._start_idx, idx - 1)

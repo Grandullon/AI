@@ -243,6 +243,125 @@ def test_loop_repeat_reejecuta_el_mismo_paso(monkeypatch):
     assert pausas[:3] == [0, 0, 1]
 
 
+# ==================== recarga tras modificar la macro en pausa ====================
+
+def test_mover_puntero_fuerza_recarga_y_despierta():
+    from core.player import Player
+    p = _player_min()
+    Player.mover_puntero(p, 3)
+    assert p.step_index() == 3
+    assert p._recargar_flag is True
+    assert p._step_continue.is_set()   # despierta el wait
+
+
+def test_insertar_antes_ejecuta_los_nuevos_y_no_el_viejo(monkeypatch):
+    """Regresión: el bucle captura el paso ANTES de pausarse. Si la UI
+    inserta pasos delante, sin recargar ejecutaría el paso viejo y se
+    saltaría los recién insertados."""
+    import time
+    monkeypatch.setattr("core.player._HAS_PYWINAUTO", True)
+    from core.player import Player
+    from core.step_model import Macro, Step, StepType
+
+    original = Step(tipo=StepType.SLEEP, valor="0", descripcion="ORIGINAL")
+    macro = Macro(nombre="m", pasos=[original], auto_anchor=False)
+    ejecutados = []
+    pausas = []
+
+    p = Player(
+        macro=macro, screenshots_dir=".", logger=None, dry_run=True,
+        step_mode=True, run_mode="step",
+        on_status=lambda st: pausas.append(st.paso_idx) if st.en_pausa else None,
+    )
+    monkeypatch.setattr(
+        Player, "_ejecutar_paso",
+        lambda self, paso, idx: ejecutados.append(paso.descripcion),
+    )
+
+    parar = threading.Event()
+    estado = {"insertado": False}
+
+    def usuario():
+        vistas = 0
+        while not parar.is_set():
+            if len(pausas) > vistas:
+                vistas += 1
+                time.sleep(0.05)
+                if not estado["insertado"]:
+                    estado["insertado"] = True
+                    # Insertar 2 pasos ANTES del actual (como hace la UI)
+                    nuevos = [
+                        Step(tipo=StepType.SLEEP, valor="0", descripcion="NUEVO1"),
+                        Step(tipo=StepType.SLEEP, valor="0", descripcion="NUEVO2"),
+                    ]
+                    macro.pasos[0:0] = nuevos
+                    p.mover_puntero(0)     # puntero al primer nuevo + recarga
+                else:
+                    p.advance_step()
+            time.sleep(0.02)
+
+    t = threading.Thread(target=usuario, daemon=True)
+    t.start()
+    exito, _ = p.ejecutar_dni({"DNI": "x"})
+    parar.set()
+
+    assert exito is True
+    # Se ejecutan los DOS nuevos y luego el original, en orden.
+    assert ejecutados == ["NUEVO1", "NUEVO2", "ORIGINAL"]
+
+
+def test_reemplazar_no_ejecuta_el_paso_borrado(monkeypatch):
+    """Al reemplazar, el paso capturado antes de la pausa ya no existe:
+    no debe ejecutarse."""
+    import time
+    monkeypatch.setattr("core.player._HAS_PYWINAUTO", True)
+    from core.player import Player
+    from core.step_model import Macro, Step, StepType
+
+    viejo = Step(tipo=StepType.SLEEP, valor="0", descripcion="VIEJO")
+    macro = Macro(nombre="m", pasos=[viejo], auto_anchor=False)
+    ejecutados = []
+    pausas = []
+
+    p = Player(
+        macro=macro, screenshots_dir=".", logger=None, dry_run=True,
+        step_mode=True, run_mode="step",
+        on_status=lambda st: pausas.append(st.paso_idx) if st.en_pausa else None,
+    )
+    monkeypatch.setattr(
+        Player, "_ejecutar_paso",
+        lambda self, paso, idx: ejecutados.append(paso.descripcion),
+    )
+
+    parar = threading.Event()
+    estado = {"hecho": False}
+
+    def usuario():
+        vistas = 0
+        while not parar.is_set():
+            if len(pausas) > vistas:
+                vistas += 1
+                time.sleep(0.05)
+                if not estado["hecho"]:
+                    estado["hecho"] = True
+                    del macro.pasos[0:1]                     # borra VIEJO
+                    macro.pasos[0:0] = [Step(tipo=StepType.SLEEP, valor="0",
+                                             descripcion="NUEVO")]
+                    p.mover_puntero(0)
+                else:
+                    p.advance_step()
+            time.sleep(0.02)
+
+    t = threading.Thread(target=usuario, daemon=True)
+    t.start()
+    exito, _ = p.ejecutar_dni({"DNI": "x"})
+    parar.set()
+
+    assert exito is True
+    assert "VIEJO" not in ejecutados     # el borrado NO se ejecuta
+    assert ejecutados == ["NUEVO"]
+
+
 # ==================== propagación y cableado ====================
 
 def test_replay_runner_propaga_skip_y_repeat():
