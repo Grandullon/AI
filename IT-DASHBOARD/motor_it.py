@@ -344,8 +344,9 @@ TRAMOS_EDAD = [("-30", 0, 29), ("30-39", 30, 39), ("40-49", 40, 49),
                ("50-59", 50, 59), ("60+", 60, 200)]
 
 # Hitos de control de la IT: son los que de verdad miran en gestion.
-HITO_PRORROGA = 365    # 12 meses: control INSS, prorroga o propuesta de IP
-HITO_MAXIMO = 545      # 18 meses: plazo maximo agotado
+HITO_PRORROGA = 365     # 12 meses: control INSS, prorroga o propuesta de IP
+HITO_MAXIMO = 545       # 18 meses: plazo maximo agotado
+HITO_VIGILANCIA = 500   # umbral operativo de la tabla de seguimiento
 
 
 def _contar(registros, campo, top=None):
@@ -385,7 +386,7 @@ def _persona(reg, anonimo: bool) -> dict:
 
 def construir_indicadores(snapshots: list[Snapshot], altas_por_fecha: dict,
                           plantilla: dict, incidencias: list[str],
-                          anonimo: bool = False) -> dict:
+                          anonimo: bool = False, vigilancia: int = HITO_VIGILANCIA) -> dict:
     """snapshots ordenados de mas antiguo a mas reciente."""
     if not snapshots:
         return {"error": "No se ha podido leer ningún volcado diario.",
@@ -433,6 +434,7 @@ def construir_indicadores(snapshots: list[Snapshot], altas_por_fecha: dict,
     prorroga = sorted((r for r in con_dias if HITO_PRORROGA <= r["dias"] < HITO_MAXIMO),
                       key=lambda r: -r["dias"])
     maximo = sorted((r for r in con_dias if r["dias"] >= HITO_MAXIMO), key=lambda r: -r["dias"])
+    en_vigilancia = sorted((r for r in con_dias if r["dias"] >= vigilancia), key=lambda r: -r["dias"])
     cubiertas = [r for r in vigentes if r["cubierta"]]
     sin_cubrir = [r for r in vigentes if not r["cubierta"]]
 
@@ -524,6 +526,7 @@ def construir_indicadores(snapshots: list[Snapshot], altas_por_fecha: dict,
             "dias_serie": len(serie),
             "fichero": hoy.ruta.name if hoy.ruta else "",
             "origen_altas": origen_altas,
+            "umbral_vigilancia": vigilancia,
             "anonimo": anonimo,
             "plantilla_total": total_plantilla,
         },
@@ -542,6 +545,8 @@ def construir_indicadores(snapshots: list[Snapshot], altas_por_fecha: dict,
             "largas_90": len(largas_90),
             "prorroga": len(prorroga),
             "maximo": len(maximo),
+            "vigilancia": len(en_vigilancia),
+            "umbral_vigilancia": vigilancia,
             "jornadas_mes": jornadas_mes,
             "dur_media": round(statistics.fmean(duraciones), 1) if duraciones else 0,
             "dur_mediana": round(statistics.median(duraciones), 1) if duraciones else 0,
@@ -561,7 +566,7 @@ def construir_indicadores(snapshots: list[Snapshot], altas_por_fecha: dict,
             "altas": [_persona(r, anonimo) for r in sorted(altas_hoy, key=lambda r: -(r.get("dias") or 0))],
             "bajas": [_persona(r, anonimo) for r in sorted(bajas_hoy, key=lambda r: r.get("servicio") or "")],
         },
-        "criticas": [_persona(r, anonimo) for r in (maximo + prorroga)[:80]],
+        "criticas": [_persona(r, anonimo) for r in en_vigilancia[:120]],
         "vigentes": [_persona(r, anonimo) for r in sorted(vigentes, key=lambda r: -(r.get("dias") or 0))],
     }
 

@@ -76,7 +76,7 @@ def _persona(i: int, rnd: random.Random, fecha: dt.date) -> dict:
         "f_it": fecha - dt.timedelta(days=dias),
         "f_alta": None,
         "dias": dias,
-        "sustituto": "SUSTITUTO ASIGNADO" if cubierta else "",
+        "sustituto": f"{rnd.choice(APELLIDOS)} {rnd.choice(APELLIDOS)}, {rnd.choice(NOMBRES)}".upper() if cubierta else "",
         "cubierta": cubierta,
         "motivo_sust": "I.T." if cubierta else "",
         "contrato_fin": None,

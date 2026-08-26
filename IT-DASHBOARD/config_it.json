@@ -16,6 +16,8 @@
   "generar_version_direccion": true,
   "_generar_version_direccion": "Genera ademas un HTML sin nombres ni DNI, apto para compartir con direccion y comisiones.",
   "dias_serie": 20,
+  "dias_vigilancia": 500,
+  "_dias_vigilancia": "A partir de cuantos dias entra una ausencia en la tabla de seguimiento de larga duracion.",
   "incluir_fines_de_semana": false,
   "abrir_al_terminar": true,
   "familias": {

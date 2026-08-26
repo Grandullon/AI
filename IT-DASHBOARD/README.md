@@ -15,18 +15,18 @@ Es la evolución natural del `DashboardHUVN.exe` que ya usáis: mismo enfoque
 | Indicador | Por qué importa |
 |---|---|
 | Ausencias vigentes y variación diaria | La cifra del día en una sola pantalla |
-| Reincorporaciones y ausencias nuevas | El movimiento real, no solo el saldo |
-| **Cobertura** (con sustituto / sin sustituto) | Cuántas plazas se están quedando descubiertas |
+| Altas e ITs nuevas | El movimiento real, no solo el saldo |
+| **Sustituto IT** con nombre, en cada tabla | Se ve quién cubre la plaza y cuáles no tiene nadie |
 | Evolución de los últimos volcados | Si la curva sube o baja, con tendencia por unidad |
 | Concentración por Dirección / Servicio / Centro | Dónde está el problema, no solo cuánto |
-| **Tramo 12–18 meses y más de 18 meses** | Los casos que exigen actuación ante el INSS |
+| **Vigilancia a partir de 500 días** | La lista de seguimiento, con los que superan los 18 meses marcados aparte |
 | Duración media y mediana, tramos de duración | Distingue el catarro de tres días de la baja de dos años |
 | Repuntes anómalos por servicio | Avisa cuando una unidad se sale de su media del periodo |
 | Tasa sobre plantilla activa | Solo si está el fichero PA del día; es opcional |
 
 Sobre el volcado real del 26/08/2026 el informe detecta, entre otras cosas,
-**322 ausencias sin sustituto asignado (53,7 %)** y **35 casos por encima de los
-12 meses**. Ninguno de esos dos datos es visible hoy abriendo el Excel.
+**322 ausencias sin sustituto asignado (53,7 %)** y los casos que superan el umbral
+de vigilancia de 500 días. Ninguno de esos datos es visible hoy abriendo el Excel.
 
 ## Cómo se usa
 
@@ -76,6 +76,7 @@ Bloc de notas y **no hace falta recompilar**:
   "patron_altas":  "ALTAS IT A {YYYY}-{MM}-{DD}",
   "salida":        "\\\\Alhambra\\grupo$\\HUVN-PERSONAL-ACTIVO\\Dashboard-IT.html",
   "dias_serie": 20,
+  "dias_vigilancia": 500,
   "generar_version_direccion": true
 }
 ```

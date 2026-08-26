@@ -9,12 +9,15 @@
 :root{
   /* Blanco clinico: el fondo casi no existe y la separacion la hacen los hilos.
      El acento petroleo solo aparece en lo que se puede tocar. */
-  --bg:#f5f8f8; --surface:#ffffff; --surface-2:#f2f6f6;
-  --border:#dfe7e7; --border-soft:#eef3f3;
+  --bg:#ffffff; --panel:#f6f9f9; --surface:#ffffff; --surface-2:#f0f5f5;
+  --border:#dee8e7; --border-soft:#eaf1f0;
   --ink:#12201f; --ink-2:#43524f; --muted:#7d8b89;
-  --brand:#0e6b73; --brand-2:#12868f; --brand-soft:#e6f2f2;
+  --brand:#12756f; --brand-2:#178c84; --brand-soft:#e4f1ef;
   --hdr:#ffffff; --hdr-ink:#12201f;
-  --grid:#eaf0f0; --axis:#cbd7d6;
+  /* Banda de seccion: petroleo -> esmeralda. Mismo lenguaje que las
+     aplicaciones del SAS, recorrido de color propio. */
+  --g1:#0d5f6b; --g2:#17857e; --g3:#2f9c6a; --g-ink:#ffffff;
+  --grid:#e9f0ef; --axis:#c9d6d4;
   --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300;
   --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
   --good-ink:#006300; --crit-ink:#b02a2a;
@@ -24,12 +27,13 @@
 }
 @media (prefers-color-scheme:dark){
   :root:where(:not([data-theme="light"])){
-    --bg:#0c1010; --surface:#141a1a; --surface-2:#1a2121;
-    --border:#26302f; --border-soft:#1f2726;
+    --bg:#0b0f0f; --panel:#141a1a; --surface:#1a2222; --surface-2:#202929;
+    --border:#28322f; --border-soft:#212a29;
     --ink:#eef4f3; --ink-2:#bdc9c7; --muted:#849492;
     --brand:#46b3ba; --brand-2:#63c6cc; --brand-soft:#123033;
     --hdr:#0f1616; --hdr-ink:#eef4f3;
-    --grid:#212a29; --axis:#31403e;
+    --g1:#0a3d45; --g2:#0f5c56; --g3:#1a6d4c; --g-ink:#eef6f3;
+    --grid:#232c2b; --axis:#333f3d;
     --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300;
     --good-ink:#0ca30c; --crit-ink:#e46a6a;
     --q1:#1c5cab; --q2:#256abf; --q3:#2a78d6; --q4:#3987e5; --q5:#5598e7; --q6:#6da7ec; --q7:#86b6ef;
@@ -37,12 +41,13 @@
   }
 }
 :root[data-theme="dark"]{
-  --bg:#0c1010; --surface:#141a1a; --surface-2:#1a2121;
-  --border:#26302f; --border-soft:#1f2726;
+  --bg:#0b0f0f; --panel:#141a1a; --surface:#1a2222; --surface-2:#202929;
+  --border:#28322f; --border-soft:#212a29;
   --ink:#eef4f3; --ink-2:#bdc9c7; --muted:#849492;
   --brand:#46b3ba; --brand-2:#63c6cc; --brand-soft:#123033;
   --hdr:#0f1616; --hdr-ink:#eef4f3;
-  --grid:#212a29; --axis:#31403e;
+  --g1:#0a3d45; --g2:#0f5c56; --g3:#1a6d4c; --g-ink:#eef6f3;
+  --grid:#232c2b; --axis:#333f3d;
   --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300;
   --good-ink:#0ca30c; --crit-ink:#e46a6a;
   --q1:#1c5cab; --q2:#256abf; --q3:#2a78d6; --q4:#3987e5; --q5:#5598e7; --q6:#6da7ec; --q7:#86b6ef;
@@ -66,6 +71,10 @@ header{
   background:var(--hdr); color:var(--hdr-ink); display:flex; align-items:center;
   gap:14px; padding:0 26px; height:62px; position:sticky; top:0; z-index:60;
   border-bottom:1px solid var(--border);
+}
+header::after{
+  content:'';position:absolute;left:0;right:0;bottom:-3px;height:3px;
+  background:linear-gradient(90deg,var(--g1) 0%,var(--g2) 52%,var(--g3) 100%);
 }
 .cruz{width:22px;height:22px;position:relative;flex:0 0 auto}
 .cruz::before,.cruz::after{content:'';position:absolute;background:var(--brand);border-radius:1.5px}
@@ -94,7 +103,7 @@ main{max-width:1560px;margin:0 auto;padding:18px 22px 56px}
 .tira{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;color:var(--muted);font-size:12.5px}
 .tira b{color:var(--ink-2);font-weight:600}
 .sello{
-  display:inline-flex;align-items:center;gap:6px;background:var(--surface);
+  display:inline-flex;align-items:center;gap:6px;background:var(--panel);
   border:1px solid var(--border);border-radius:999px;padding:5px 13px;font-size:12px;color:var(--ink-2);
 }
 .sello .k{font-size:10.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}
@@ -102,15 +111,19 @@ main{max-width:1560px;margin:0 auto;padding:18px 22px 56px}
 .ic-sello{width:13px;height:13px;color:var(--muted);flex:0 0 auto}
 
 /* ═══ Tarjetas ═══ */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow)}
-.card-h{padding:13px 16px 11px;border-bottom:1px solid var(--border-soft);display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-.card-h h2{font-size:13px;letter-spacing:.02em;min-width:0}
-.card-h .sub{font-size:11.5px;color:var(--muted);margin-left:auto;text-align:right}
-.card-b{padding:14px 16px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
+.card-h{
+  padding:11px 17px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  background:linear-gradient(90deg,var(--g1) 0%,var(--g2) 55%,var(--g3) 100%);
+  color:var(--g-ink);
+}
+.card-h h2{font-size:12.5px;letter-spacing:.09em;text-transform:uppercase;font-weight:600;min-width:0}
+.card-h .sub{font-size:11.5px;color:rgba(255,255,255,.82);margin-left:auto;text-align:right}
+.card-b{padding:16px 17px}
 
 /* ═══ Alertas ═══ */
 .alertas{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));gap:10px;margin-bottom:16px}
-.al{display:flex;gap:11px;padding:12px 14px;border-radius:var(--r);border:1px solid var(--border);background:var(--surface);box-shadow:var(--shadow);border-left-width:4px}
+.al{display:flex;gap:11px;padding:13px 15px;border-radius:8px;border:1px solid var(--border);background:var(--surface);box-shadow:var(--shadow);border-left-width:4px}
 .al .ic{flex:0 0 auto;width:17px;height:17px;margin-top:1px}
 .al .ic svg{width:17px;height:17px;display:block}
 .al .tt{font-size:13px;font-weight:600;margin-bottom:2px}
@@ -121,8 +134,8 @@ main{max-width:1560px;margin:0 auto;padding:18px 22px 56px}
 .al.info{border-left-color:var(--axis)} .al.info .ic{color:var(--muted)}
 
 /* ═══ KPIs ═══ */
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:10px;margin-bottom:16px}
-.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:15px 17px;box-shadow:var(--shadow)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:10px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:15px 17px}
 .kpi .lb{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
 .kpi .vl{font-size:30px;font-weight:600;letter-spacing:-.03em;line-height:1.15;margin-top:6px}
 .kpi .nt{font-size:11.5px;color:var(--muted);margin-top:2px}
@@ -168,7 +181,7 @@ main{max-width:1560px;margin:0 auto;padding:18px 22px 56px}
 .bar-vl{font-size:12px;color:var(--ink-2);text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
 
 /* ═══ Tablas ═══ */
-.tbl-wrap{overflow-x:auto;max-width:100%}
+.tbl-wrap{overflow-x:auto;max-width:100%;background:var(--surface);border:1px solid var(--border);border-radius:7px}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 thead th{
   position:sticky;top:0;background:var(--surface-2);border-bottom:1px solid var(--border);
@@ -202,9 +215,9 @@ select.act{border-color:var(--brand);color:var(--brand);font-weight:600}
 .cuenta{margin-left:auto;font-size:12px;font-weight:600;color:var(--brand);background:var(--brand-soft);border-radius:999px;padding:4px 12px;font-variant-numeric:tabular-nums}
 
 /* ═══ Pestañas ═══ */
-.tabs{display:flex;gap:4px;background:var(--surface-2);border-radius:9px;padding:3px}
-.tab{border:none;background:transparent;border-radius:7px;padding:6px 13px;font:inherit;font-size:12.5px;font-weight:500;color:var(--ink-2);cursor:pointer}
-.tab[aria-selected=true]{background:var(--surface);color:var(--brand);font-weight:600;box-shadow:var(--shadow)}
+.tabs{display:flex;gap:3px;background:rgba(255,255,255,.16);border-radius:8px;padding:3px}
+.tab{border:none;background:transparent;border-radius:6px;padding:5px 13px;font:inherit;font-size:12.5px;font-weight:500;color:rgba(255,255,255,.88);cursor:pointer}
+.tab[aria-selected=true]{background:var(--surface);color:var(--brand);font-weight:600}
 
 /* ═══ SVG ═══ */
 svg{display:block;width:100%;overflow:visible}
@@ -236,6 +249,9 @@ footer{margin-top:26px;padding-top:14px;border-top:1px solid var(--border);color
   .hd-r,.filtros,.tabs,.btn{display:none!important}
   main{max-width:none;padding:0}
   .card,.kpi,.al{break-inside:avoid;border-color:#999}
+  header::after{display:none}
+  .card-h{background:#fff!important;color:#000!important;border-bottom:1.5px solid #000}
+  .card-h .sub{color:#444!important}
   .rej.g2,.rej.g3{grid-template-columns:1fr 1fr}
   thead th{position:static}
   body{font-size:11px}
@@ -268,7 +284,10 @@ footer{margin-top:26px;padding-top:14px;border-top:1px solid var(--border);color
   </div>
 
   <section class="alertas" id="alertas"></section>
-  <section class="kpis" id="kpis"></section>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h"><h2>Resumen del día</h2><div class="sub" id="subResumen"></div></div>
+    <div class="card-b"><section class="kpis" id="kpis"></section></div>
+  </div>
 
   <div class="rej g2">
     <div class="card">
@@ -276,7 +295,7 @@ footer{margin-top:26px;padding-top:14px;border-top:1px solid var(--border);color
       <div class="card-b"><div id="chEvol"></div></div>
     </div>
     <div class="card">
-      <div class="card-h"><h2>Movimiento diario</h2><div class="sub">altas ↓ · bajas nuevas ↑</div></div>
+      <div class="card-h"><h2>Movimiento diario</h2><div class="sub">altas ↓ · ITs nuevas ↑</div></div>
       <div class="card-b"><div id="chFlujo"></div></div>
     </div>
   </div>
@@ -310,11 +329,11 @@ footer{margin-top:26px;padding-top:14px;border-top:1px solid var(--border);color
 
   <div class="rej g2">
     <div class="card">
-      <div class="card-h"><h2>Reincorporaciones (altas)</h2><div class="sub" id="subAltas"></div></div>
+      <div class="card-h"><h2>Altas del día</h2><div class="sub" id="subAltas"></div></div>
       <div class="card-b tbl-wrap"><table id="tblAltas"></table></div>
     </div>
     <div class="card">
-      <div class="card-h"><h2>Ausencias nuevas del día</h2><div class="sub" id="subBajas"></div></div>
+      <div class="card-h"><h2>ITs nuevas del día</h2><div class="sub" id="subBajas"></div></div>
       <div class="card-b tbl-wrap"><table id="tblBajas"></table></div>
     </div>
   </div>
@@ -322,7 +341,7 @@ footer{margin-top:26px;padding-top:14px;border-top:1px solid var(--border);color
   <div class="card" style="margin-bottom:16px">
     <div class="card-h">
       <h2>Vigilancia de larga duración</h2>
-      <div class="sub">tramo de control del INSS: 12 meses (prórroga o propuesta de IP) y 18 meses (plazo máximo)</div>
+      <div class="sub" id="subVigilancia"></div>
     </div>
     <div class="card-b tbl-wrap"><table id="tblCriticas"></table></div>
   </div>
@@ -337,7 +356,7 @@ footer{margin-top:26px;padding-top:14px;border-top:1px solid var(--border);color
         <select id="fCen"></select>
         <select id="fFam"></select>
         <select id="fCub">
-          <option value="">Cubiertas y sin cubrir</option>
+          <option value="">Con y sin sustituto</option>
           <option value="si">Solo con sustituto</option>
           <option value="no">Solo sin sustituto</option>
         </select>
@@ -405,6 +424,7 @@ $("#btnTema").onclick = () => {
 /* ═══════════════════ cabecera y KPIs ═══════════════════ */
 function cabecera(){
   $("#chipFecha").textContent = D.meta.fecha_larga;
+  $("#subResumen").textContent = D.meta.fecha_larga;
   $("#mtFichero").textContent = D.meta.fichero || "volcado del día";
   $("#mtDias").textContent = D.meta.dias_serie;
   $("#mtOrigen").textContent = D.meta.origen_altas;
@@ -426,13 +446,13 @@ function pintarKpis(){
     {hero:true, lb:"Ausencias vigentes", vl:N(k.vigentes),
      extra:`<div class="delta ${clase}">${texto}</div>`,
      nt:`${N(k.it)} son incapacidad temporal · media del periodo ${N1(k.media_periodo)}`},
-    {lb:"Reincorporaciones", vl:N(k.altas_hoy), nt:"altas registradas"},
-    {lb:"Ausencias nuevas", vl:N(k.bajas_hoy), nt:"bajas del día"},
-    {lb:"Saldo del día", vl:(k.saldo > 0 ? "+" : "") + N(k.saldo), nt:"nuevas menos altas"},
-    {lb:"Cobertura", vl:N1(k.cobertura) + " %", nt:`${N(k.sin_cubrir)} sin sustituto asignado`},
+    {lb:"Altas", vl:N(k.altas_hoy), nt:"altas registradas"},
+    {lb:"ITs nuevas", vl:N(k.bajas_hoy), nt:"iniciadas en el día"},
+    {lb:"Saldo del día", vl:(k.saldo > 0 ? "+" : "") + N(k.saldo), nt:"ITs nuevas menos altas"},
+    {lb:"Con sustituto", vl:N(k.cubiertas), nt:`${N(k.sin_cubrir)} sin sustituto (${N1(100 - k.cobertura)} %)`},
     {lb:"Duración media", vl:N1(k.dur_media), nt:`días · mediana ${N1(k.dur_mediana)}`},
     {lb:"Más de 90 días", vl:N(k.largas_90), nt:"ausencias de larga duración"},
-    {lb:"Tramo 12–18 meses", vl:N(k.prorroga), nt:`${N(k.maximo)} superan los 18 meses`},
+    {lb:`Más de ${k.umbral_vigilancia} días`, vl:N(k.vigilancia), nt:`${N(k.maximo)} superan los 18 meses`},
   ];
   if (k.tasa_absentismo !== null && k.tasa_absentismo !== undefined)
     tarjetas.push({lb:"Sobre plantilla activa", vl:N1(k.tasa_absentismo) + " %",
@@ -528,7 +548,7 @@ function svgEvolucion(){
       <div class="fila"><span>Vigentes</span><b>${N(p.total)}</b></div>
       <div class="fila"><span>Incapacidad temporal</span><b>${N(p.it)}</b></div>
       ${p.altas !== null ? `<div class="fila"><span>Altas</span><b>${N(p.altas)}</b></div>` : ""}
-      ${p.bajas !== null ? `<div class="fila"><span>Nuevas</span><b>${N(p.bajas)}</b></div>` : ""}`, ev);
+      ${p.bajas !== null ? `<div class="fila"><span>ITs nuevas</span><b>${N(p.bajas)}</b></div>` : ""}`, ev);
   });
   capa.addEventListener("mouseleave", () => { ocultarTip(); cruz.style.opacity = "0"; });
 }
@@ -555,7 +575,7 @@ function svgFlujo(){
   const ejeX = s.map((p, i) => i % paso === 0
     ? `<text class="tk" x="${m.l + i * (iw / s.length) + (iw / s.length) / 2}" y="${H - 6}" text-anchor="middle">${p.et}</text>` : "").join("");
 
-  cont.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Altas y ausencias nuevas por día">
+  cont.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Altas e ITs nuevas por día">
     <text class="tk" x="${m.l - 6}" y="${cero - ih/4}" text-anchor="end">nuevas</text>
     <text class="tk" x="${m.l - 6}" y="${cero + ih/4}" text-anchor="end">altas</text>
     ${barras}
@@ -563,16 +583,16 @@ function svgFlujo(){
     ${ejeX}
   </svg>
   <div class="leyenda">
-    <span><i style="background:${css("--s2")}"></i>Ausencias nuevas</span>
-    <span><i style="background:${css("--s1")}"></i>Reincorporaciones</span>
+    <span><i style="background:${css("--s2")}"></i>ITs nuevas</span>
+    <span><i style="background:${css("--s1")}"></i>Altas</span>
   </div>`;
 
   cont.querySelectorAll("rect[data-i]").forEach(r => {
     r.addEventListener("mousemove", ev => {
       const p = s[+r.dataset.i];
       verTip(`<b>${fFecha(p.f)}</b>
-        <div class="fila"><span>Ausencias nuevas</span><b>${N(p.bajas)}</b></div>
-        <div class="fila"><span>Reincorporaciones</span><b>${N(p.altas)}</b></div>
+        <div class="fila"><span>ITs nuevas</span><b>${N(p.bajas)}</b></div>
+        <div class="fila"><span>Altas</span><b>${N(p.altas)}</b></div>
         <div class="fila"><span>Vigentes ese día</span><b>${N(p.total)}</b></div>`, ev);
     });
     r.addEventListener("mouseleave", ocultarTip);
@@ -631,7 +651,7 @@ function pintarRanking(){
   const filas = D.ranking[ejeActual] || [];
   const conPlantilla = filas.some(f => f.tasa !== null && f.tasa !== undefined);
   const max = Math.max(...filas.map(f => f.total), 1);
-  const cab = ["Unidad", "Ausencias", "", "Sin cubrir", "+90 días",
+  const cab = ["Unidad", "Ausencias", "", "Sin sustituto", "+90 días",
                conPlantilla ? "% s/ plantilla" : "Media periodo", "Tendencia"];
   $("#tblRank").innerHTML = `
     <thead><tr>${cab.map((c, i) => `<th class="${i && i !== 2 && i !== 6 ? "num" : ""}">${c}</th>`).join("")}</tr></thead>
@@ -674,12 +694,17 @@ const celdaDias = f => {
   const nivel = d >= 545 ? "d3" : d >= 365 ? "d2" : "";
   return `<span class="dias ${nivel}">${N(d)}</span>`;
 };
-const celdaCobertura = f => f.cub
-  ? `<span class="pt si">${D.meta.anonimo ? "Cubierta" : esc(f.sus)}</span>`
+/* Se muestra el nombre real de SUSTITUTO_IT: asi se ve quien cubre la plaza y
+   quedan a la vista las que no tiene nadie. */
+const celdaSustituto = f => f.cub
+  ? `<span class="pt si" title="${esc(f.sus)}">${D.meta.anonimo ? "Con sustituto" : esc(f.sus)}</span>`
   : `<span class="pt no">Sin sustituto</span>`;
 
 function pintarMovimientos(){
   const mv = D.movimientos;
+  const umbral = D.meta.umbral_vigilancia || 500;
+  $("#subVigilancia").textContent =
+    `ausencias de más de ${umbral} días · se marcan aparte las que superan los 18 meses (plazo máximo)`;
   $("#subAltas").textContent = `${mv.altas.length} persona(s) · fuente: ${D.meta.origen_altas}`;
   $("#subBajas").textContent = `${mv.bajas.length} persona(s) · frente al volcado anterior`;
   tablaPersonas("#tblAltas", mv.altas.slice(0, 60), [
@@ -694,8 +719,8 @@ function pintarMovimientos(){
     {t:"Servicio", v:f => esc(f.srv)},
     {t:"Código", v:f => `<span class="tag">${esc(f.cod)}</span>`},
     {t:"Inicio", v:f => fFecha(f.ini), num:true},
-    {t:"Cobertura", v:celdaCobertura},
-  ], "Hoy no hay ausencias nuevas.");
+    {t:"Sustituto IT", v:celdaSustituto},
+  ], "Hoy no consta ninguna IT nueva.");
   tablaPersonas("#tblCriticas", D.criticas, [
     {t:"Persona", v:f => `<span title="${esc(f.nom)}">${esc(f.nom)}</span>`, cls:"nom"},
     {t:"Servicio", v:f => esc(f.srv)},
@@ -705,9 +730,11 @@ function pintarMovimientos(){
     {t:"Días", v:celdaDias, num:true},
     {t:"Situación", v:f => f.dias >= 545
         ? '<span class="pt no">Supera 18 meses</span>'
-        : '<span class="pt si">Tramo 12–18 meses</span>'},
-    {t:"Cobertura", v:celdaCobertura},
-  ], "Ninguna ausencia supera los 12 meses.");
+        : f.dias >= 365
+          ? '<span class="pt si">Tramo 12–18 meses</span>'
+          : '<span class="pt si">En seguimiento</span>'},
+    {t:"Sustituto IT", v:celdaSustituto},
+  ], "Ninguna ausencia supera el umbral de vigilancia.");
 }
 
 /* ═══════════════════ detalle: filtros, orden, páginas ═══════════════════ */
@@ -723,7 +750,7 @@ const COLS = [
   {k:"cod", t:"Código"},
   {k:"ini", t:"Inicio", num:true},
   {k:"dias", t:"Días", num:true},
-  {k:"sus", t:"Cobertura"},
+  {k:"sus", t:"Sustituto IT"},
 ];
 
 function opciones(sel, valores, etiqueta){
@@ -767,7 +794,7 @@ function pintarDetalle(){
     <tbody>${trozo.map(f => `<tr>${cols.map(c => {
       let v;
       if (c.k === "dias") v = celdaDias(f);
-      else if (c.k === "sus") v = celdaCobertura(f);
+      else if (c.k === "sus") v = celdaSustituto(f);
       else if (c.k === "ini") v = fFecha(f.ini);
       else if (c.k === "cod") v = `<span class="tag">${esc(f.cod)}</span>`;
       else v = esc(f[c.k]);

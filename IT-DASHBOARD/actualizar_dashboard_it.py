@@ -50,6 +50,9 @@ CONFIG_DEFECTO = {
     "_generar_version_direccion": "Genera ademas un HTML sin nombres ni DNI, apto para "
                                   "compartir con direccion y comisiones.",
     "dias_serie": 20,
+    "dias_vigilancia": 500,
+    "_dias_vigilancia": "A partir de cuantos dias entra una ausencia en la tabla de "
+                        "seguimiento de larga duracion.",
     "incluir_fines_de_semana": False,
     "abrir_al_terminar": True,
     "familias": FAMILIAS_DEFECTO,
@@ -246,8 +249,9 @@ def ejecutar(args, log) -> Path | None:
     salida = Path(args.salida or config["salida"])
     generados = []
 
+    vigilancia = int(config.get("dias_vigilancia", 500))
     indicadores = construir_indicadores(snapshots, altas, plantilla, incidencias,
-                                        anonimo=args.anonimo)
+                                        anonimo=args.anonimo, vigilancia=vigilancia)
     ruta = generar_html(indicadores, salida)
     generados.append(ruta)
     log(f"Generado: {ruta}")
@@ -255,7 +259,8 @@ def ejecutar(args, log) -> Path | None:
 
     # Version sin datos personales, para direccion y comisiones.
     if config.get("generar_version_direccion") and not args.anonimo:
-        agregado = construir_indicadores(snapshots, altas, plantilla, incidencias, anonimo=True)
+        agregado = construir_indicadores(snapshots, altas, plantilla, incidencias,
+                                         anonimo=True, vigilancia=vigilancia)
         ruta_dir = salida.with_name(salida.stem + "-direccion" + salida.suffix)
         generar_html(agregado, ruta_dir)
         generados.append(ruta_dir)
@@ -268,7 +273,7 @@ def ejecutar(args, log) -> Path | None:
     log(f"  Altas del dia ............... {k['altas_hoy']}")
     log(f"  Ausencias nuevas ............ {k['bajas_hoy']}")
     log(f"  Sin sustituto ............... {k['sin_cubrir']} ({100 - k['cobertura']:.1f} %)")
-    log(f"  Mas de 12 meses ............. {k['prorroga'] + k['maximo']}")
+    log(f"  Mas de {vigilancia} dias ............ {k['vigilancia']}")
 
     if config.get("abrir_al_terminar", True) and not args.headless:
         abrir(generados[0], log)
