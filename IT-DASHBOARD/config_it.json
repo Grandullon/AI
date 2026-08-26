@@ -1,0 +1,31 @@
+{
+  "_como_editar": "Edita este fichero con el Bloc de notas. Guarda y vuelve a ejecutar el programa. NO hace falta recompilar nada.",
+  "_tokens": {
+    "{YYYY}": "anio (2026)",
+    "{MM}": "mes 2 digitos",
+    "{DD}": "dia 2 digitos",
+    "{MES_TEXTO}": "nombre del mes en espanol"
+  },
+  "carpeta_it": "\\\\Alhambra\\grupo$\\HUVN-PERSONAL-ACTIVO\\IT DIARIA\\IT DIARIA\\{YYYY}",
+  "patron_it": "IT-HVN-{YYYY}-{MM}-{DD}",
+  "carpeta_altas": "\\\\Alhambra\\grupo$\\HUVN-PERSONAL-ACTIVO\\IT DIARIA\\ALTAS IT\\{YYYY}",
+  "patron_altas": "ALTAS IT A {YYYY}-{MM}-{DD}",
+  "carpeta_personal_activo": "\\\\Alhambra\\grupo$\\HUVN-PERSONAL-ACTIVO\\Personal Activo\\{YYYY}",
+  "patron_personal_activo": "PA-{YYYY}-{MM}-{DD}",
+  "salida": "\\\\Alhambra\\grupo$\\HUVN-PERSONAL-ACTIVO\\Dashboard-IT.html",
+  "generar_version_direccion": true,
+  "_generar_version_direccion": "Genera ademas un HTML sin nombres ni DNI, apto para compartir con direccion y comisiones.",
+  "dias_serie": 20,
+  "incluir_fines_de_semana": false,
+  "abrir_al_terminar": true,
+  "familias": {
+    "IT": "Incapacidad temporal",
+    "IM": "Maternidad",
+    "PA": "Paternidad",
+    "PL": "Permisos",
+    "EMB": "Riesgo embarazo"
+  },
+  "_familias": "Prefijo o codigo de COD_INC -> nombre del grupo. Revisalo con la unidad: ITE/ITA/ITN/ITI/ITR se agrupan como incapacidad temporal.",
+  "columnas": {},
+  "_columnas": "Solo si algun volcado cambia de cabecera. Ej: {\"f_it\": \"Fecha IT\"}"
+}

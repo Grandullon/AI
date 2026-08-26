@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ausencias e IT · HUVN</title>
+<style>
+/* ═══ Tokens. Claro por defecto; oscuro por sistema y por interruptor. ═══ */
+:root{
+  --bg:#f1f4f8; --surface:#ffffff; --surface-2:#f7f9fc;
+  --border:#dbe3ec; --border-soft:#eaeff5;
+  --ink:#10151c; --ink-2:#44505f; --muted:#7b8795;
+  --brand:#0057a8; --brand-2:#1a6ec2; --brand-soft:#e8f1fb; --hdr:#0057a8;
+  --grid:#e7ecf2; --axis:#c8d2dd;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --good-ink:#006300; --crit-ink:#b02a2a;
+  --q1:#86b6ef; --q2:#6da7ec; --q3:#5598e7; --q4:#3987e5; --q5:#2a78d6; --q6:#256abf; --q7:#1c5cab;
+  --shadow:0 1px 2px rgba(16,32,56,.06),0 4px 14px rgba(16,32,56,.05);
+  --r:10px;
+}
+@media (prefers-color-scheme:dark){
+  :root:where(:not([data-theme="light"])){
+    --bg:#0e1013; --surface:#15181c; --surface-2:#1b1f25;
+    --border:#282d34; --border-soft:#20242a;
+    --ink:#f2f5f8; --ink-2:#c2cad4; --muted:#8b95a1;
+    --brand:#4d9ae8; --brand-2:#6fb0ef; --brand-soft:#16283c; --hdr:#102a45;
+    --grid:#23282f; --axis:#333a43;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300;
+    --good-ink:#0ca30c; --crit-ink:#e46a6a;
+    --q1:#1c5cab; --q2:#256abf; --q3:#2a78d6; --q4:#3987e5; --q5:#5598e7; --q6:#6da7ec; --q7:#86b6ef;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1013; --surface:#15181c; --surface-2:#1b1f25;
+  --border:#282d34; --border-soft:#20242a;
+  --ink:#f2f5f8; --ink-2:#c2cad4; --muted:#8b95a1;
+  --brand:#4d9ae8; --brand-2:#6fb0ef; --brand-soft:#16283c; --hdr:#102a45;
+  --grid:#23282f; --axis:#333a43;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300;
+  --good-ink:#0ca30c; --crit-ink:#e46a6a;
+  --q1:#1c5cab; --q2:#256abf; --q3:#2a78d6; --q4:#3987e5; --q5:#5598e7; --q6:#6da7ec; --q7:#86b6ef;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+  background:var(--bg); color:var(--ink); font-size:14px; line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{font-weight:600;letter-spacing:-.01em}
+a{color:var(--brand)}
+
+/* ═══ Cabecera ═══ */
+header{
+  background:var(--hdr); color:#fff; display:flex; align-items:center;
+  gap:14px; padding:0 22px; height:56px; position:sticky; top:0; z-index:60;
+}
+.cruz{width:24px;height:24px;position:relative;flex:0 0 auto}
+.cruz::before,.cruz::after{content:'';position:absolute;background:rgba(255,255,255,.92);border-radius:2px}
+.cruz::before{width:8px;height:24px;left:8px;top:0}
+.cruz::after{width:24px;height:8px;left:0;top:8px}
+.marca{font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.marca b{font-weight:600}
+.marca span{font-weight:400;opacity:.72;margin-left:5px}
+.mk-sm{display:none}
+.chip{
+  background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);
+  border-radius:6px;padding:3px 10px;font-size:12px;white-space:nowrap;
+}
+.hd-r{margin-left:auto;display:flex;gap:8px;align-items:center}
+.btn{
+  background:var(--surface);border:1px solid var(--border);color:var(--ink-2);
+  border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;font-weight:500;
+  cursor:pointer;white-space:nowrap;transition:.15s;
+}
+.btn:hover{border-color:var(--brand);color:var(--brand)}
+.btn.ghost{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.24);color:#fff}
+.btn.ghost:hover{background:rgba(255,255,255,.26);color:#fff}
+.btn.on{background:var(--brand);border-color:var(--brand);color:#fff}
+
+main{max-width:1560px;margin:0 auto;padding:18px 22px 56px}
+.tira{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;color:var(--muted);font-size:12.5px}
+.tira b{color:var(--ink-2);font-weight:600}
+.sello{
+  display:inline-flex;align-items:center;gap:6px;background:var(--surface);
+  border:1px solid var(--border);border-radius:999px;padding:4px 11px;font-size:12px;color:var(--ink-2);
+}
+
+/* ═══ Tarjetas ═══ */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow)}
+.card-h{padding:13px 16px 11px;border-bottom:1px solid var(--border-soft);display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.card-h h2{font-size:13px;letter-spacing:.02em;min-width:0}
+.card-h .sub{font-size:11.5px;color:var(--muted);margin-left:auto;text-align:right}
+.card-b{padding:14px 16px}
+
+/* ═══ Alertas ═══ */
+.alertas{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));gap:10px;margin-bottom:16px}
+.al{display:flex;gap:11px;padding:12px 14px;border-radius:var(--r);border:1px solid var(--border);background:var(--surface);box-shadow:var(--shadow);border-left-width:4px}
+.al .ic{font-size:15px;line-height:1.3;flex:0 0 auto;width:18px;text-align:center}
+.al .tt{font-size:13px;font-weight:600;margin-bottom:2px}
+.al .dd{font-size:12px;color:var(--ink-2);line-height:1.4}
+.al.critico{border-left-color:var(--crit)} .al.critico .ic{color:var(--crit)}
+.al.aviso{border-left-color:var(--serious)} .al.aviso .ic{color:var(--serious)}
+.al.ok{border-left-color:var(--good)} .al.ok .ic{color:var(--good)}
+.al.info{border-left-color:var(--axis)} .al.info .ic{color:var(--muted)}
+
+/* ═══ KPIs ═══ */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:10px;margin-bottom:16px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:13px 15px;box-shadow:var(--shadow)}
+.kpi .lb{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+.kpi .vl{font-size:29px;font-weight:600;letter-spacing:-.025em;line-height:1.15;margin-top:5px}
+.kpi .nt{font-size:11.5px;color:var(--muted);margin-top:2px}
+.kpi.hero{grid-column:span 2;background:linear-gradient(180deg,var(--brand-soft),var(--surface))}
+.kpi.hero .vl{font-size:44px}
+.delta{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;margin-top:5px}
+.delta.sube{color:var(--crit-ink)} .delta.baja{color:var(--good-ink)} .delta.igual{color:var(--muted)}
+
+/* ═══ Rejilla ═══ */
+.rej{display:grid;gap:14px;margin-bottom:16px}
+.rej>*{min-width:0}   /* sin esto, una tabla ancha estira la columna del grid */
+.rej.g2{grid-template-columns:1.55fr 1fr}
+.rej.g3{grid-template-columns:repeat(3,1fr)}
+@media(min-width:1280px){.kpis{grid-template-columns:repeat(5,1fr)}}
+/* Pantallas estrechas: los jefes lo abriran en el movil tarde o temprano. */
+@media(max-width:760px){
+  header{padding:0 12px;gap:9px}
+  .marca span,#chipFecha,.mk-lg{display:none}
+  .mk-sm{display:inline}
+  .btn{padding:7px 10px}
+  .hd-r .et{display:none}   /* en el movil los botones se quedan en icono */
+  main{padding:14px 12px 40px}
+  .bar-row{grid-template-columns:108px 1fr 44px}
+  .kpi.hero .vl{font-size:36px}
+  input[type=search]{min-width:100%}
+  .cuenta{margin-left:0}
+}
+@media(max-width:1100px){.rej.g2,.rej.g3{grid-template-columns:1fr}.kpi.hero{grid-column:span 2}}
+
+/* ═══ Barras horizontales ═══ */
+.bar-row{display:grid;grid-template-columns:150px 1fr 52px;align-items:center;gap:10px;padding:3px 0}
+.bar-row .nm{font-size:12px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-tk{height:9px;background:var(--surface-2);border-radius:5px;overflow:hidden}
+.bar-fl{height:100%;border-radius:5px;min-width:3px;transition:width .6s cubic-bezier(.16,1,.3,1)}
+.bar-vl{font-size:12px;color:var(--ink-2);text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+
+/* ═══ Tablas ═══ */
+.tbl-wrap{overflow-x:auto;max-width:100%}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+thead th{
+  position:sticky;top:0;background:var(--surface-2);border-bottom:1px solid var(--border);
+  padding:9px 11px;text-align:left;font-size:10.5px;font-weight:600;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;cursor:pointer;user-select:none;
+}
+thead th:hover{color:var(--brand)}
+thead th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
+tbody tr{border-bottom:1px solid var(--border-soft)}
+tbody tr:hover{background:var(--surface-2)}
+td{padding:8px 11px;vertical-align:middle}
+td.nom{font-weight:500;max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tag{display:inline-block;padding:2px 7px;border-radius:5px;font-size:10.5px;font-weight:600;background:var(--brand-soft);color:var(--brand)}
+.tag.gris{background:var(--surface-2);color:var(--muted)}
+.pt{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.pt::before{content:'';width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+.pt.si::before{background:var(--s1)} .pt.si{color:var(--ink-2)}
+.pt.no::before{background:var(--s2)} .pt.no{color:var(--ink-2)}
+.dias{font-variant-numeric:tabular-nums;font-weight:600}
+.dias.d3{color:var(--crit-ink)} .dias.d2{color:var(--serious)}
+
+/* ═══ Filtros ═══ */
+.filtros{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+input[type=search],select{
+  border:1px solid var(--border);border-radius:8px;padding:7px 11px;font:inherit;font-size:12.5px;
+  background:var(--surface);color:var(--ink);max-width:210px;
+}
+input[type=search]{min-width:230px}
+input[type=search]:focus,select:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+select.act{border-color:var(--brand);color:var(--brand);font-weight:600}
+.cuenta{margin-left:auto;font-size:12px;font-weight:600;color:var(--brand);background:var(--brand-soft);border-radius:999px;padding:4px 12px;font-variant-numeric:tabular-nums}
+
+/* ═══ Pestañas ═══ */
+.tabs{display:flex;gap:4px;background:var(--surface-2);border-radius:9px;padding:3px}
+.tab{border:none;background:transparent;border-radius:7px;padding:6px 13px;font:inherit;font-size:12.5px;font-weight:500;color:var(--ink-2);cursor:pointer}
+.tab[aria-selected=true]{background:var(--surface);color:var(--brand);font-weight:600;box-shadow:var(--shadow)}
+
+/* ═══ SVG ═══ */
+svg{display:block;width:100%;overflow:visible}
+.gl{stroke:var(--grid);stroke-width:1}
+.ax{stroke:var(--axis);stroke-width:1}
+.tk{fill:var(--muted);font-size:10.5px}
+.pt-h{fill:var(--surface);stroke-width:2}
+.leyenda{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-2);margin-top:10px}
+.leyenda i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+
+/* ═══ Tooltip ═══ */
+#tip{
+  position:fixed;z-index:99;pointer-events:none;opacity:0;transition:opacity .1s;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  box-shadow:0 6px 24px rgba(16,32,56,.16);padding:8px 11px;font-size:12px;max-width:280px;
+}
+#tip b{display:block;font-size:12.5px;margin-bottom:3px}
+#tip .fila{display:flex;gap:10px;justify-content:space-between;color:var(--ink-2)}
+#tip .fila b{display:inline;font-weight:600;color:var(--ink)}
+
+.vacio{text-align:center;padding:34px 16px;color:var(--muted);font-size:12.5px}
+footer{margin-top:26px;padding-top:14px;border-top:1px solid var(--border);color:var(--muted);font-size:11.5px;display:flex;gap:14px;flex-wrap:wrap}
+
+/* ═══ Impresión: sale un informe, no una captura de pantalla ═══ */
+@media print{
+  :root{--bg:#fff;--surface:#fff;--shadow:none}
+  header{position:static;background:#fff;color:#000;border-bottom:2px solid #000}
+  .cruz::before,.cruz::after{background:#000}
+  .hd-r,.filtros,.tabs,.btn{display:none!important}
+  main{max-width:none;padding:0}
+  .card,.kpi,.al{break-inside:avoid;border-color:#999}
+  .rej.g2,.rej.g3{grid-template-columns:1fr 1fr}
+  thead th{position:static}
+  body{font-size:11px}
+}
+</style>
+</head>
+<body data-palette="#2a78d6,#eb6834,#1baf7a,#eda100,#e87ba4,#008300">
+
+<header>
+  <div class="cruz"></div>
+  <div class="marca"><b class="mk-lg">Hospital Universitario Virgen de las Nieves</b><b class="mk-sm">HUVN · Ausencias</b><span>· Ausencias e Incapacidad Temporal</span></div>
+  <div class="chip" id="chipFecha">—</div>
+  <div class="hd-r">
+    <button class="btn ghost" id="btnTema" title="Cambiar entre claro y oscuro">◐<span class="et"> Tema</span></button>
+    <button class="btn ghost" id="btnCsv" title="Exportar a CSV lo que estás viendo">⬇<span class="et"> CSV</span></button>
+    <button class="btn ghost" onclick="window.print()" title="Imprimir o guardar en PDF">⎙<span class="et"> Imprimir / PDF</span></button>
+  </div>
+</header>
+
+<main>
+  <div class="tira">
+    <span class="sello">📄 <b id="mtFichero">—</b></span>
+    <span class="sello">📈 Serie de <b id="mtDias">—</b> volcados</span>
+    <span class="sello">🔄 Altas según <b id="mtOrigen">—</b></span>
+    <span class="sello">🕒 Generado el <b id="mtGenerado">—</b></span>
+    <span class="sello" title="El informe se genera en la red interna. Ningún dato sale del hospital.">🔒 Datos internos · no salen de la red</span>
+  </div>
+
+  <section class="alertas" id="alertas"></section>
+  <section class="kpis" id="kpis"></section>
+
+  <div class="rej g2">
+    <div class="card">
+      <div class="card-h"><h2>Evolución de ausencias vigentes</h2><div class="sub" id="subEvol"></div></div>
+      <div class="card-b"><div id="chEvol"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Movimiento diario</h2><div class="sub">altas ↓ · bajas nuevas ↑</div></div>
+      <div class="card-b"><div id="chFlujo"></div></div>
+    </div>
+  </div>
+
+  <div class="rej g3">
+    <div class="card">
+      <div class="card-h"><h2>Duración de la ausencia</h2><div class="sub">días transcurridos</div></div>
+      <div class="card-b" id="chTramos"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Tipo de ausencia</h2><div class="sub">por familia de código</div></div>
+      <div class="card-b" id="chFamilia"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Edad de la persona ausente</h2><div class="sub" id="subEdad"></div></div>
+      <div class="card-b" id="chEdad"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h">
+      <h2>Dónde se concentran las ausencias</h2>
+      <div class="tabs" role="tablist" id="tabsRank" style="margin-left:auto">
+        <button class="tab" role="tab" data-eje="direccion" aria-selected="true">Dirección</button>
+        <button class="tab" role="tab" data-eje="servicio" aria-selected="false">Servicio</button>
+        <button class="tab" role="tab" data-eje="centro" aria-selected="false">Centro</button>
+      </div>
+    </div>
+    <div class="card-b tbl-wrap"><table id="tblRank"></table></div>
+  </div>
+
+  <div class="rej g2">
+    <div class="card">
+      <div class="card-h"><h2>Reincorporaciones (altas)</h2><div class="sub" id="subAltas"></div></div>
+      <div class="card-b tbl-wrap"><table id="tblAltas"></table></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Ausencias nuevas del día</h2><div class="sub" id="subBajas"></div></div>
+      <div class="card-b tbl-wrap"><table id="tblBajas"></table></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h">
+      <h2>Vigilancia de larga duración</h2>
+      <div class="sub">tramo de control del INSS: 12 meses (prórroga o propuesta de IP) y 18 meses (plazo máximo)</div>
+    </div>
+    <div class="card-b tbl-wrap"><table id="tblCriticas"></table></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h"><h2>Detalle completo</h2><div class="sub">busca, filtra y exporta lo que estés viendo</div></div>
+    <div class="card-b">
+      <div class="filtros">
+        <input type="search" id="fTexto" placeholder="Nombre, servicio, categoría, DNI…" autocomplete="off">
+        <select id="fDir"></select>
+        <select id="fSrv"></select>
+        <select id="fCen"></select>
+        <select id="fFam"></select>
+        <select id="fCub">
+          <option value="">Cubiertas y sin cubrir</option>
+          <option value="si">Solo con sustituto</option>
+          <option value="no">Solo sin sustituto</option>
+        </select>
+        <select id="fDur">
+          <option value="">Cualquier duración</option>
+          <option value="30">Más de 30 días</option>
+          <option value="90">Más de 90 días</option>
+          <option value="365">Más de 12 meses</option>
+          <option value="545">Más de 18 meses</option>
+        </select>
+        <button class="btn" id="btnLimpiar">✕ Limpiar</button>
+        <span class="cuenta" id="cuenta">—</span>
+      </div>
+      <div class="tbl-wrap"><table id="tblDetalle"></table></div>
+      <div id="paginacion" class="filtros" style="justify-content:center;margin:12px 0 0"></div>
+    </div>
+  </div>
+
+  <footer>
+    <span>Generado automáticamente desde los volcados diarios de la unidad de Personal.</span>
+    <span id="ftAnonimo"></span>
+  </footer>
+</main>
+
+<div id="tip" role="tooltip"></div>
+
+<script>
+"use strict";
+/* Los datos se incrustan al generar el fichero: no hay peticiones a ningún
+   servidor ni a internet. El HTML es autosuficiente. */
+const D = __DATOS_JSON__;
+const GENERADO = "__GENERADO__";
+
+const N = n => (n === null || n === undefined || n === "") ? "—" : Number(n).toLocaleString("es-ES");
+const N1 = n => (n === null || n === undefined) ? "—" : Number(n).toLocaleString("es-ES", {maximumFractionDigits:1});
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const $ = s => document.querySelector(s);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fFecha = iso => { if(!iso) return "—"; const [a,m,d] = iso.split("-"); return `${d}/${m}/${a}`; };
+
+/* ─────────── tooltip único ─────────── */
+const tip = $("#tip");
+function verTip(html, ev){
+  tip.innerHTML = html; tip.style.opacity = "1";
+  const r = tip.getBoundingClientRect();
+  let x = ev.clientX + 14, y = ev.clientY - r.height - 10;
+  if (x + r.width > innerWidth - 8) x = ev.clientX - r.width - 14;
+  if (y < 8) y = ev.clientY + 18;
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+}
+const ocultarTip = () => { tip.style.opacity = "0"; };
+document.addEventListener("scroll", ocultarTip, true);
+
+/* ─────────── tema ─────────── */
+const raiz = document.documentElement;
+try { const t = localStorage.getItem("huvn-tema"); if (t) raiz.dataset.theme = t; } catch(e){}
+$("#btnTema").onclick = () => {
+  const oscuro = raiz.dataset.theme === "dark" ||
+    (!raiz.dataset.theme && matchMedia("(prefers-color-scheme:dark)").matches);
+  raiz.dataset.theme = oscuro ? "light" : "dark";
+  try { localStorage.setItem("huvn-tema", raiz.dataset.theme); } catch(e){}
+  pintarTodo();
+};
+
+/* ═══════════════════ cabecera y KPIs ═══════════════════ */
+function cabecera(){
+  $("#chipFecha").textContent = D.meta.fecha_larga;
+  $("#mtFichero").textContent = D.meta.fichero || "volcado del día";
+  $("#mtDias").textContent = D.meta.dias_serie;
+  $("#mtOrigen").textContent = D.meta.origen_altas;
+  $("#mtGenerado").textContent = GENERADO;
+  $("#ftAnonimo").textContent = D.meta.anonimo
+    ? "Vista agregada: este informe no incluye nombres ni DNI."
+    : "Contiene datos de carácter personal: uso interno y restringido.";
+  document.title = `Ausencias e IT · ${fFecha(D.meta.fecha)} · HUVN`;
+}
+
+function pintarKpis(){
+  const k = D.kpis;
+  const delta = k.delta_dia;
+  const clase = delta > 0 ? "sube" : delta < 0 ? "baja" : "igual";
+  const flecha = delta > 0 ? "▲" : delta < 0 ? "▼" : "=";
+  const texto = delta === 0 ? "sin cambio" : `${flecha} ${Math.abs(delta)} respecto al volcado anterior`;
+
+  const tarjetas = [
+    {hero:true, lb:"Ausencias vigentes", vl:N(k.vigentes),
+     extra:`<div class="delta ${clase}">${texto}</div>`,
+     nt:`${N(k.it)} son incapacidad temporal · media del periodo ${N1(k.media_periodo)}`},
+    {lb:"Reincorporaciones", vl:N(k.altas_hoy), nt:"altas registradas"},
+    {lb:"Ausencias nuevas", vl:N(k.bajas_hoy), nt:"bajas del día"},
+    {lb:"Saldo del día", vl:(k.saldo > 0 ? "+" : "") + N(k.saldo), nt:"nuevas menos altas"},
+    {lb:"Cobertura", vl:N1(k.cobertura) + " %", nt:`${N(k.sin_cubrir)} sin sustituto asignado`},
+    {lb:"Duración media", vl:N1(k.dur_media), nt:`días · mediana ${N1(k.dur_mediana)}`},
+    {lb:"Más de 90 días", vl:N(k.largas_90), nt:"ausencias de larga duración"},
+    {lb:"Tramo 12–18 meses", vl:N(k.prorroga), nt:`${N(k.maximo)} superan los 18 meses`},
+  ];
+  if (k.tasa_absentismo !== null && k.tasa_absentismo !== undefined)
+    tarjetas.push({lb:"Sobre plantilla activa", vl:N1(k.tasa_absentismo) + " %",
+                   nt:`${N(D.meta.plantilla_total)} personas activas`});
+
+  $("#kpis").innerHTML = tarjetas.map(t => `
+    <div class="kpi${t.hero ? " hero" : ""}">
+      <div class="lb">${t.lb}</div>
+      <div class="vl">${t.vl}</div>
+      ${t.extra || ""}
+      <div class="nt">${t.nt}</div>
+    </div>`).join("");
+}
+
+function pintarAlertas(){
+  const icono = {critico:"⛔", aviso:"⚠", ok:"✓", info:"ℹ"};
+  const nombre = {critico:"Crítico", aviso:"Atención", ok:"Correcto", info:"Información"};
+  $("#alertas").innerHTML = D.alertas.map(a => `
+    <div class="al ${a.nivel}">
+      <div class="ic" aria-hidden="true">${icono[a.nivel] || "ℹ"}</div>
+      <div>
+        <div class="tt">${esc(a.titulo)}</div>
+        <div class="dd"><b>${nombre[a.nivel] || ""}.</b> ${esc(a.detalle)}</div>
+      </div>
+    </div>`).join("");
+}
+
+/* ═══════════════════ gráficos ═══════════════════ */
+function svgEvolucion(){
+  const s = D.serie, cont = $("#chEvol");
+  if (s.length < 2){ cont.innerHTML = `<div class="vacio">Con un solo volcado no hay evolución que dibujar.<br>Se irá construyendo según se acumulen días.</div>`; return; }
+  const W = cont.clientWidth || 760, H = 250, m = {t:14, r:16, b:26, l:44};
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const vals = s.map(p => p.total);
+  let min = Math.min(...vals), max = Math.max(...vals);
+  const pad = Math.max(2, (max - min) * 0.25); min = Math.max(0, min - pad); max = max + pad;
+  const X = i => m.l + (s.length === 1 ? iw/2 : i * iw / (s.length - 1));
+  const Y = v => m.t + ih - ((v - min) / (max - min || 1)) * ih;
+
+  const ticks = 4, lineas = [];
+  for (let i = 0; i <= ticks; i++){
+    const v = min + (max - min) * i / ticks, y = Y(v);
+    lineas.push(`<line class="gl" x1="${m.l}" y1="${y}" x2="${W - m.r}" y2="${y}"/>
+      <text class="tk" x="${m.l - 8}" y="${y + 3.5}" text-anchor="end">${Math.round(v)}</text>`);
+  }
+  const paso = Math.max(1, Math.ceil(s.length / 12));
+  const ejeX = s.map((p, i) => i % paso === 0 || i === s.length - 1
+    ? `<text class="tk" x="${X(i)}" y="${H - 6}" text-anchor="middle">${p.et}</text>` : "").join("");
+
+  const linea = s.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(p.total).toFixed(1)}`).join(" ");
+  const area = `${linea} L${X(s.length - 1).toFixed(1)},${m.t + ih} L${X(0).toFixed(1)},${m.t + ih} Z`;
+  const ult = s[s.length - 1];
+
+  cont.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolución diaria de ausencias vigentes">
+    <defs><linearGradient id="gEvol" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${css("--s1")}" stop-opacity=".22"/>
+      <stop offset="100%" stop-color="${css("--s1")}" stop-opacity="0"/>
+    </linearGradient></defs>
+    ${lineas.join("")}
+    <path d="${area}" fill="url(#gEvol)"/>
+    <path d="${linea}" fill="none" stroke="${css("--s1")}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${X(s.length - 1)}" cy="${Y(ult.total)}" r="4.5" fill="${css("--s1")}" class="pt-h" stroke="${css("--surface")}"/>
+    <text x="${X(s.length - 1)}" y="${Y(ult.total) - 12}" text-anchor="end" font-size="12" font-weight="600" fill="${css("--ink")}">${N(ult.total)}</text>
+    ${ejeX}
+    <line class="ax" x1="${m.l}" y1="${m.t + ih}" x2="${W - m.r}" y2="${m.t + ih}"/>
+    <line id="cruz" class="ax" x1="0" y1="${m.t}" x2="0" y2="${m.t + ih}" style="opacity:0"/>
+    <rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent" id="capaEvol"/>
+  </svg>`;
+  $("#subEvol").textContent = `del ${fFecha(s[0].f)} al ${fFecha(ult.f)}`;
+
+  const capa = cont.querySelector("#capaEvol"), cruz = cont.querySelector("#cruz");
+  capa.addEventListener("mousemove", ev => {
+    const caja = capa.getBoundingClientRect();
+    const rel = (ev.clientX - caja.left) / caja.width * iw + m.l;
+    let i = Math.round((rel - m.l) / (iw / Math.max(1, s.length - 1)));
+    i = Math.max(0, Math.min(s.length - 1, i));
+    const p = s[i];
+    cruz.setAttribute("x1", X(i)); cruz.setAttribute("x2", X(i)); cruz.style.opacity = ".6";
+    verTip(`<b>${fFecha(p.f)}</b>
+      <div class="fila"><span>Vigentes</span><b>${N(p.total)}</b></div>
+      <div class="fila"><span>Incapacidad temporal</span><b>${N(p.it)}</b></div>
+      ${p.altas !== null ? `<div class="fila"><span>Altas</span><b>${N(p.altas)}</b></div>` : ""}
+      ${p.bajas !== null ? `<div class="fila"><span>Nuevas</span><b>${N(p.bajas)}</b></div>` : ""}`, ev);
+  });
+  capa.addEventListener("mouseleave", () => { ocultarTip(); cruz.style.opacity = "0"; });
+}
+
+function svgFlujo(){
+  const s = D.serie.filter(p => p.altas !== null || p.bajas !== null), cont = $("#chFlujo");
+  if (!s.length){ cont.innerHTML = `<div class="vacio">Hacen falta al menos dos volcados<br>para calcular altas y bajas.</div>`; return; }
+  const W = cont.clientWidth || 400, H = 250, m = {t:14, r:10, b:26, l:34};
+  const iw = W - m.l - m.r, ih = H - m.t - m.b, cero = m.t + ih / 2;
+  const tope = Math.max(4, ...s.map(p => Math.max(p.altas || 0, p.bajas || 0)));
+  const alto = v => (v / tope) * (ih / 2 - 6);
+  const ancho = Math.max(3, Math.min(16, iw / s.length - 3));
+
+  const barras = s.map((p, i) => {
+    const x = m.l + i * (iw / s.length) + (iw / s.length - ancho) / 2;
+    const hb = alto(p.bajas || 0), ha = alto(p.altas || 0);
+    return `
+      <rect x="${x.toFixed(1)}" y="${(cero - 2 - hb).toFixed(1)}" width="${ancho.toFixed(1)}" height="${Math.max(0, hb).toFixed(1)}"
+            rx="3" fill="${css("--s2")}" data-i="${i}"/>
+      <rect x="${x.toFixed(1)}" y="${(cero + 2).toFixed(1)}" width="${ancho.toFixed(1)}" height="${Math.max(0, ha).toFixed(1)}"
+            rx="3" fill="${css("--s1")}" data-i="${i}"/>`;
+  }).join("");
+  const paso = Math.max(1, Math.ceil(s.length / 6));
+  const ejeX = s.map((p, i) => i % paso === 0
+    ? `<text class="tk" x="${m.l + i * (iw / s.length) + (iw / s.length) / 2}" y="${H - 6}" text-anchor="middle">${p.et}</text>` : "").join("");
+
+  cont.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Altas y ausencias nuevas por día">
+    <text class="tk" x="${m.l - 6}" y="${cero - ih/4}" text-anchor="end">nuevas</text>
+    <text class="tk" x="${m.l - 6}" y="${cero + ih/4}" text-anchor="end">altas</text>
+    ${barras}
+    <line class="ax" x1="${m.l}" y1="${cero}" x2="${W - m.r}" y2="${cero}"/>
+    ${ejeX}
+  </svg>
+  <div class="leyenda">
+    <span><i style="background:${css("--s2")}"></i>Ausencias nuevas</span>
+    <span><i style="background:${css("--s1")}"></i>Reincorporaciones</span>
+  </div>`;
+
+  cont.querySelectorAll("rect[data-i]").forEach(r => {
+    r.addEventListener("mousemove", ev => {
+      const p = s[+r.dataset.i];
+      verTip(`<b>${fFecha(p.f)}</b>
+        <div class="fila"><span>Ausencias nuevas</span><b>${N(p.bajas)}</b></div>
+        <div class="fila"><span>Reincorporaciones</span><b>${N(p.altas)}</b></div>
+        <div class="fila"><span>Vigentes ese día</span><b>${N(p.total)}</b></div>`, ev);
+    });
+    r.addEventListener("mouseleave", ocultarTip);
+  });
+}
+
+function barrasHorizontales(destino, datos, colores, sufijo){
+  const total = datos.reduce((a, d) => a + d[1], 0) || 1;
+  const max = Math.max(...datos.map(d => d[1]), 1);
+  $(destino).innerHTML = datos.map(([nombre, valor], i) => `
+    <div class="bar-row" data-n="${esc(nombre)}" data-v="${valor}">
+      <div class="nm" title="${esc(nombre)}">${esc(nombre)}${sufijo || ""}</div>
+      <div class="bar-tk"><div class="bar-fl" style="width:${valor ? Math.max(0.6, valor / max * 100).toFixed(1) : 0}%;background:${colores[i % colores.length]}"></div></div>
+      <div class="bar-vl">${N(valor)}</div>
+    </div>`).join("");
+  $(destino).querySelectorAll(".bar-row").forEach(fila => {
+    fila.addEventListener("mousemove", ev => {
+      const v = +fila.dataset.v;
+      verTip(`<b>${esc(fila.dataset.n)}</b>
+        <div class="fila"><span>Personas</span><b>${N(v)}</b></div>
+        <div class="fila"><span>Del total</span><b>${(v / total * 100).toFixed(1)} %</b></div>`, ev);
+    });
+    fila.addEventListener("mouseleave", ocultarTip);
+  });
+}
+
+function pintarDistribuciones(){
+  const q = ["--q1","--q2","--q3","--q4","--q5","--q6","--q7"].map(css);
+  const s = ["--s1","--s2","--s3","--s4","--s5","--s6"].map(css);
+  barrasHorizontales("#chTramos", D.distribuciones.tramos, q, " días");
+  barrasHorizontales("#chFamilia", D.distribuciones.familia, s);
+  barrasHorizontales("#chEdad", D.distribuciones.edad, q.slice(1, 6), " años");
+  $("#subEdad").textContent = D.kpis.edad_media ? `media ${N1(D.kpis.edad_media)} años` : "";
+}
+
+/* ═══════════════════ tabla de concentración ═══════════════════ */
+let ejeActual = "direccion";
+function chispa(serie, ancho = 74, alto = 20){
+  if (!serie || serie.length < 2) return "";
+  const max = Math.max(...serie), min = Math.min(...serie);
+  const rango = (max - min) || 1;
+  const p = serie.map((v, i) =>
+    `${i ? "L" : "M"}${(i * ancho / (serie.length - 1)).toFixed(1)},${(alto - 2 - ((v - min) / rango) * (alto - 4)).toFixed(1)}`).join(" ");
+  return `<svg width="${ancho}" height="${alto}" viewBox="0 0 ${ancho} ${alto}" style="width:${ancho}px">
+    <path d="${p}" fill="none" stroke="${css("--s1")}" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+}
+
+function pintarRanking(){
+  const filas = D.ranking[ejeActual] || [];
+  const conPlantilla = filas.some(f => f.tasa !== null && f.tasa !== undefined);
+  const max = Math.max(...filas.map(f => f.total), 1);
+  const cab = ["Unidad", "Ausencias", "", "Sin cubrir", "+90 días",
+               conPlantilla ? "% s/ plantilla" : "Media periodo", "Tendencia"];
+  $("#tblRank").innerHTML = `
+    <thead><tr>${cab.map((c, i) => `<th class="${i && i !== 2 && i !== 6 ? "num" : ""}">${c}</th>`).join("")}</tr></thead>
+    <tbody>${filas.map(f => `
+      <tr>
+        <td class="nom" title="${esc(f.nombre)}">${esc(f.nombre)}${f.pico ? ' <span class="tag" style="background:#fde8dd;color:#a8481f">repunte</span>' : ""}</td>
+        <td class="num"><b>${N(f.total)}</b></td>
+        <td style="width:130px">
+          <div class="bar-tk"><div class="bar-fl" style="width:${(f.total / max * 100).toFixed(1)}%;background:${css("--s1")}"></div></div>
+        </td>
+        <td class="num">${f.sin_cubrir ? `<span class="pt no">${N(f.sin_cubrir)}</span>` : "—"}</td>
+        <td class="num">${f.largas ? N(f.largas) : "—"}</td>
+        <td class="num">${conPlantilla
+            ? (f.tasa !== null && f.tasa !== undefined ? N1(f.tasa) + " %" : "—")
+            : `${N1(f.media)} <span style="color:var(--muted)">(${f.delta > 0 ? "+" : ""}${N1(f.delta)})</span>`}</td>
+        <td>${chispa(f.serie)}</td>
+      </tr>`).join("")}</tbody>`;
+  if (!filas.length) $("#tblRank").innerHTML = `<tbody><tr><td class="vacio">Sin datos.</td></tr></tbody>`;
+}
+
+$("#tabsRank").addEventListener("click", ev => {
+  const b = ev.target.closest(".tab"); if (!b) return;
+  ejeActual = b.dataset.eje;
+  [...$("#tabsRank").children].forEach(t => t.setAttribute("aria-selected", t === b));
+  pintarRanking();
+});
+
+/* ═══════════════════ movimientos del día ═══════════════════ */
+function tablaPersonas(destino, filas, columnas, vacio){
+  const el = $(destino);
+  if (!filas.length){ el.innerHTML = `<tbody><tr><td class="vacio">${vacio}</td></tr></tbody>`; return; }
+  el.innerHTML = `
+    <thead><tr>${columnas.map(c => `<th class="${c.num ? "num" : ""}">${c.t}</th>`).join("")}</tr></thead>
+    <tbody>${filas.map(f => `<tr>${columnas.map(c => `<td class="${c.num ? "num" : ""} ${c.cls || ""}">${c.v(f)}</td>`).join("")}</tr>`).join("")}</tbody>`;
+}
+
+const celdaDias = f => {
+  const d = f.dias;
+  if (d === null || d === undefined) return "—";
+  const nivel = d >= 545 ? "d3" : d >= 365 ? "d2" : "";
+  return `<span class="dias ${nivel}">${N(d)}</span>`;
+};
+const celdaCobertura = f => f.cub
+  ? `<span class="pt si">${D.meta.anonimo ? "Cubierta" : esc(f.sus)}</span>`
+  : `<span class="pt no">Sin sustituto</span>`;
+
+function pintarMovimientos(){
+  const mv = D.movimientos;
+  $("#subAltas").textContent = `${mv.altas.length} persona(s) · fuente: ${D.meta.origen_altas}`;
+  $("#subBajas").textContent = `${mv.bajas.length} persona(s) · frente al volcado anterior`;
+  tablaPersonas("#tblAltas", mv.altas.slice(0, 60), [
+    {t:"Persona", v:f => `<span title="${esc(f.nom)}">${esc(f.nom)}</span>`, cls:"nom"},
+    {t:"Servicio", v:f => esc(f.srv)},
+    {t:"Categoría", v:f => `<span class="tag gris">${esc(f.cat)}</span>`},
+    {t:"Días de baja", v:celdaDias, num:true},
+    {t:"Alta", v:f => fFecha(f.alta), num:true},
+  ], "Hoy no consta ninguna reincorporación.");
+  tablaPersonas("#tblBajas", mv.bajas.slice(0, 60), [
+    {t:"Persona", v:f => `<span title="${esc(f.nom)}">${esc(f.nom)}</span>`, cls:"nom"},
+    {t:"Servicio", v:f => esc(f.srv)},
+    {t:"Código", v:f => `<span class="tag">${esc(f.cod)}</span>`},
+    {t:"Inicio", v:f => fFecha(f.ini), num:true},
+    {t:"Cobertura", v:celdaCobertura},
+  ], "Hoy no hay ausencias nuevas.");
+  tablaPersonas("#tblCriticas", D.criticas, [
+    {t:"Persona", v:f => `<span title="${esc(f.nom)}">${esc(f.nom)}</span>`, cls:"nom"},
+    {t:"Servicio", v:f => esc(f.srv)},
+    {t:"Dirección", v:f => esc(f.dir)},
+    {t:"Código", v:f => `<span class="tag">${esc(f.cod)}</span>`},
+    {t:"Inicio", v:f => fFecha(f.ini), num:true},
+    {t:"Días", v:celdaDias, num:true},
+    {t:"Situación", v:f => f.dias >= 545
+        ? '<span class="pt no">Supera 18 meses</span>'
+        : '<span class="pt si">Tramo 12–18 meses</span>'},
+    {t:"Cobertura", v:celdaCobertura},
+  ], "Ninguna ausencia supera los 12 meses.");
+}
+
+/* ═══════════════════ detalle: filtros, orden, páginas ═══════════════════ */
+const POR_PAGINA = 50;
+let filtradas = [], pagina = 1, orden = {campo:"dias", dir:-1};
+const COLS = [
+  {k:"nom", t:"Persona", cls:"nom"},
+  {k:"dni", t:"DNI", oculta:() => D.meta.anonimo},
+  {k:"cat", t:"Categoría"},
+  {k:"srv", t:"Servicio"},
+  {k:"dir", t:"Dirección"},
+  {k:"cen", t:"Centro"},
+  {k:"cod", t:"Código"},
+  {k:"ini", t:"Inicio", num:true},
+  {k:"dias", t:"Días", num:true},
+  {k:"sus", t:"Cobertura"},
+];
+
+function opciones(sel, valores, etiqueta){
+  $(sel).innerHTML = `<option value="">${etiqueta}</option>` +
+    [...new Set(valores)].filter(Boolean).sort((a, b) => a.localeCompare(b, "es"))
+      .map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+}
+
+function aplicar(){
+  const t = $("#fTexto").value.toLowerCase().trim();
+  const dir = $("#fDir").value, srv = $("#fSrv").value, cen = $("#fCen").value;
+  const fam = $("#fFam").value, cub = $("#fCub").value, dur = +$("#fDur").value || 0;
+  ["#fDir","#fSrv","#fCen","#fFam","#fCub","#fDur"].forEach(s => $(s).classList.toggle("act", !!$(s).value));
+
+  filtradas = D.vigentes.filter(f => {
+    if (dir && f.dir !== dir) return false;
+    if (srv && f.srv !== srv) return false;
+    if (cen && f.cen !== cen) return false;
+    if (fam && f.fam !== fam) return false;
+    if (cub === "si" && !f.cub) return false;
+    if (cub === "no" && f.cub) return false;
+    if (dur && (f.dias || 0) <= dur) return false;
+    if (t && ![f.nom, f.dni, f.srv, f.cat, f.dir, f.cen, f.cod, f.sus].join(" ").toLowerCase().includes(t)) return false;
+    return true;
+  });
+  filtradas.sort((a, b) => {
+    const x = a[orden.campo], y = b[orden.campo];
+    if (typeof x === "number" || typeof y === "number") return ((x ?? -1) - (y ?? -1)) * orden.dir;
+    return String(x ?? "").localeCompare(String(y ?? ""), "es") * orden.dir;
+  });
+  pagina = 1;
+  $("#cuenta").textContent = `${N(filtradas.length)} de ${N(D.vigentes.length)}`;
+  pintarDetalle();
+}
+
+function pintarDetalle(){
+  const cols = COLS.filter(c => !(c.oculta && c.oculta()));
+  const trozo = filtradas.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA);
+  $("#tblDetalle").innerHTML = `
+    <thead><tr>${cols.map(c => `<th class="${c.num ? "num" : ""}" data-k="${c.k}">${c.t}${orden.campo === c.k ? (orden.dir > 0 ? " ↑" : " ↓") : ""}</th>`).join("")}</tr></thead>
+    <tbody>${trozo.map(f => `<tr>${cols.map(c => {
+      let v;
+      if (c.k === "dias") v = celdaDias(f);
+      else if (c.k === "sus") v = celdaCobertura(f);
+      else if (c.k === "ini") v = fFecha(f.ini);
+      else if (c.k === "cod") v = `<span class="tag">${esc(f.cod)}</span>`;
+      else v = esc(f[c.k]);
+      return `<td class="${c.num ? "num" : ""} ${c.cls || ""}">${v}</td>`;
+    }).join("")}</tr>`).join("")}</tbody>`;
+  if (!trozo.length) $("#tblDetalle").innerHTML = `<tbody><tr><td class="vacio">Sin resultados con esos filtros.</td></tr></tbody>`;
+
+  $("#tblDetalle").querySelectorAll("th[data-k]").forEach(th => {
+    th.onclick = () => {
+      const k = th.dataset.k;
+      orden = {campo:k, dir: orden.campo === k ? -orden.dir : (k === "dias" ? -1 : 1)};
+      aplicar();
+    };
+  });
+
+  const paginas = Math.ceil(filtradas.length / POR_PAGINA);
+  $("#paginacion").innerHTML = paginas <= 1 ? "" : `
+    <button class="btn" ${pagina === 1 ? "disabled" : ""} data-p="${pagina - 1}">← Anterior</button>
+    <span style="color:var(--muted);font-size:12px">Página ${pagina} de ${paginas}</span>
+    <button class="btn" ${pagina === paginas ? "disabled" : ""} data-p="${pagina + 1}">Siguiente →</button>`;
+  $("#paginacion").querySelectorAll("button[data-p]").forEach(b => {
+    b.onclick = () => { pagina = +b.dataset.p; pintarDetalle(); scrollTo({top:$("#tblDetalle").offsetTop - 80, behavior:"smooth"}); };
+  });
+}
+
+["#fTexto","#fDir","#fSrv","#fCen","#fFam","#fCub","#fDur"].forEach(s => {
+  $(s).addEventListener("input", aplicar);
+  $(s).addEventListener("change", aplicar);
+});
+$("#btnLimpiar").onclick = () => {
+  ["#fTexto","#fDir","#fSrv","#fCen","#fFam","#fCub","#fDur"].forEach(s => $(s).value = "");
+  aplicar();
+};
+
+/* Exporta lo que se está viendo, no el fichero entero. */
+$("#btnCsv").onclick = () => {
+  const cols = COLS.filter(c => !(c.oculta && c.oculta()));
+  const cab = cols.map(c => `"${c.t}"`).join(";");
+  const filas = filtradas.map(f => cols.map(c => `"${String(f[c.k] ?? "").replace(/"/g, '""')}"`).join(";"));
+  const csv = "﻿" + [cab, ...filas].join("\r\n");   // BOM: Excel en español lo abre bien
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv;charset=utf-8"}));
+  a.download = `ausencias-${D.meta.fecha}${filtradas.length !== D.vigentes.length ? "-filtrado" : ""}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+};
+
+document.addEventListener("keydown", ev => {
+  if ((ev.ctrlKey || ev.metaKey) && ev.key === "f"){ ev.preventDefault(); $("#fTexto").focus(); $("#fTexto").select(); }
+});
+
+/* ═══════════════════ arranque ═══════════════════ */
+function pintarTodo(){
+  svgEvolucion(); svgFlujo(); pintarDistribuciones(); pintarRanking();
+}
+function iniciar(){
+  if (D.error){ document.querySelector("main").innerHTML = `<div class="card"><div class="card-b vacio">${esc(D.error)}</div></div>`; return; }
+  cabecera(); pintarAlertas(); pintarKpis(); pintarMovimientos();
+  opciones("#fDir", D.vigentes.map(f => f.dir), "Todas las direcciones");
+  opciones("#fSrv", D.vigentes.map(f => f.srv), "Todos los servicios");
+  opciones("#fCen", D.vigentes.map(f => f.cen), "Todos los centros");
+  opciones("#fFam", D.vigentes.map(f => f.fam), "Todos los tipos");
+  aplicar(); pintarTodo();
+}
+iniciar();
+let temporizador;
+addEventListener("resize", () => { clearTimeout(temporizador); temporizador = setTimeout(pintarTodo, 180); });
+</script>
+</body>
+</html>
