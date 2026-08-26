@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import random
+from pathlib import Path
 
 from motor_it import FAMILIAS_DEFECTO, Snapshot, familia_de
 
@@ -123,7 +124,8 @@ def datos_demo(fecha_ref: dt.date, n_dias: int = 20, tamano: int = 600):
             r = dict(p)
             r["dias"] = (fecha - r["f_it"]).days
             registros.append(r)
-        snapshots.append(Snapshot(fecha, registros, None))
+        snapshots.append(Snapshot(fecha, registros,
+                                  Path("DEMOSTRACION-datos-inventados.xlsx")))
 
     plantilla = {
         "total": 7420,
