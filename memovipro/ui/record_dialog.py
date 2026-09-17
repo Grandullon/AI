@@ -91,6 +91,7 @@ class RecordDialog(QDialog):
         self._kb_listener = None
         self._countdown_left = COUNTDOWN_SECS
         self._counter_steps = 0
+        self._counter_descartados = 0
         self._worker: Optional[_ResolveWorker] = None
         self._control: Optional[ControlWindow] = None
         # Nombre consistente con el que usan _iniciar_grabacion y
@@ -254,11 +255,21 @@ class RecordDialog(QDialog):
             return
         self._actualizar_zonas_excluidas()
         n = len(self._recorder.pasos)
-        if n != self._counter_steps:
+        descartados = getattr(self._recorder, "clics_descartados", 0)
+        if n != self._counter_steps or descartados != self._counter_descartados:
             self._counter_steps = n
-            self.contador.setText(f"{n} acciones capturadas")
+            self._counter_descartados = descartados
+            texto = f"{n} acciones capturadas"
+            if descartados:
+                # Aviso en el momento: si el panel tapa el botón que
+                # quieres pulsar, el clic se descarta y sin este contador
+                # no hay forma de enterarse hasta revisar la macro.
+                plural = "s" if descartados > 1 else ""
+                texto += (f"   ⚠ {descartados} clic{plural} sobre esta "
+                          "ventana (no contado" + plural + ")")
+            self.contador.setText(texto)
             if self._control is not None:
-                self._control.set_action(f"{n} acciones capturadas")
+                self._control.set_action(texto)
 
     def _start_hotkey(self):
         if not _HAS_PYNPUT:

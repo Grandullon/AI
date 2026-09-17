@@ -14,6 +14,7 @@ canales (RGB vs BGR) entre la captura del template y la de pantalla.
 from __future__ import annotations
 
 import base64
+import threading
 
 try:
     import numpy as np
@@ -42,17 +43,39 @@ def disponible() -> bool:
     return _HAS_CV2 and _HAS_MSS
 
 
+# Contexto de captura reutilizado por hilo. Crear uno nuevo en cada
+# llamada (`with mss.mss()`) costaba decenas de milisegundos, y esta
+# función se llama una vez por clic durante la grabación. Es por hilo
+# porque el objeto de mss no se puede compartir entre hilos.
+_local = threading.local()
+
+
+def _sct():
+    sct = getattr(_local, "sct", None)
+    if sct is None:
+        sct = mss.mss()
+        _local.sct = sct
+    return sct
+
+
 def capturar_region_png(x: int, y: int, w: int = THUMB_W, h: int = THUMB_H) -> bytes | None:
-    """Captura una región centrada en (x, y) y la devuelve como PNG (bytes)."""
+    """Captura una región centrada en (x, y) y la devuelve como PNG (bytes).
+
+    OJO: esto tarda milisegundos, a veces decenas. NO llamarla desde el
+    enganche del ratón: Windows desengancha los hooks que tardan de más,
+    y la grabación se queda muda sin avisar. El recorder la llama desde
+    un hilo aparte."""
     if not _HAS_MSS:
         return None
     try:
         left = int(x - w // 2)
         top = int(y - h // 2)
-        with mss.mss() as sct:
-            shot = sct.grab({"left": left, "top": top, "width": int(w), "height": int(h)})
-            return mss.tools.to_png(shot.rgb, shot.size)
+        shot = _sct().grab({"left": left, "top": top, "width": int(w), "height": int(h)})
+        return mss.tools.to_png(shot.rgb, shot.size)
     except Exception:
+        # Un fallo puede dejar el contexto inservible: lo tiramos para
+        # que el siguiente intento cree uno limpio.
+        _local.sct = None
         return None
 
 

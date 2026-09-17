@@ -53,7 +53,25 @@ TECLAS_IGNORADAS = {"f9"}
 # Detección de doble clic: dos clics del mismo botón en la misma posición
 # (con tolerancia DOUBLE_CLICK_RADIUS_PX) dentro de DOUBLE_CLICK_THRESHOLD_S
 # se fusionan en un único evento marcado como `double=True`.
-DOUBLE_CLICK_THRESHOLD_S = 0.5
+def _umbral_doble_clic_s() -> float:
+    """Tiempo de doble clic configurado en Windows, en segundos.
+
+    Usar el del sistema y no un número inventado importa: es el mismo que
+    aplica la aplicación que se está grabando, así que lo que nosotros
+    fusionamos en un doble clic es exactamente lo que ella va a
+    interpretar como tal. Fuera de Windows, medio segundo (el valor por
+    defecto de Windows)."""
+    try:
+        import ctypes
+        ms = int(ctypes.windll.user32.GetDoubleClickTime())
+        if 100 <= ms <= 5000:
+            return ms / 1000.0
+    except Exception:
+        pass
+    return 0.5
+
+
+DOUBLE_CLICK_THRESHOLD_S = _umbral_doble_clic_s()
 DOUBLE_CLICK_RADIUS_PX = 8
 
 
@@ -80,6 +98,10 @@ class EventoCrudo:
     descripcion: str = ""
     timestamp: float = 0.0
     img_png: bytes | None = None  # thumbnail PNG alrededor del clic (matching)
+    # Sobre que rellena el hilo de miniaturas. La captura NO puede hacerse
+    # dentro del enganche del ratón (ver _arrancar_miniaturas), así que el
+    # evento se crea con el sobre vacío y se lee al construir la macro.
+    img_holder: dict | None = None
     # Selector/ancla resueltos EN EL MOMENTO del clic por el hilo
     # resolutor. Si está a None, `construir_macro` los resuelve al final
     # (peor: la pantalla ya ha cambiado).
@@ -543,6 +565,8 @@ class Recorder:
         # o un arrastre del panel acaban como pasos de la macro. La UI
         # (RecordDialog) actualiza esta lista periódicamente.
         self.zonas_excluidas: list[tuple[int, int, int, int]] = []
+        # Clics que se han tirado por caer sobre el propio MemoviPro.
+        self.clics_descartados: int = 0
 
     # Propiedad usada por la GUI para el contador en vivo.
     @property
@@ -558,6 +582,8 @@ class Recorder:
         self._modifiers = set()
         self._modifiers_desde = {}
         self._press_pendiente = None
+        self.clics_descartados = 0
+        self._arrancar_miniaturas()
         self._arrancar_resolutor()
         self._mouse_listener = mouse.Listener(
             on_click=self._on_click,
@@ -567,6 +593,74 @@ class Recorder:
         self._mouse_listener.start()
         self._kb_listener.start()
         logger.info("Recorder.start · listeners pynput arrancados")
+
+    # ---- Captura de miniaturas (fuera del enganche del ratón) ----
+    #
+    # Cada clic guarda una miniatura de lo que había alrededor, que sirve
+    # de respaldo al reproducir. Capturarla es una operación de pantalla
+    # que tarda milisegundos y a veces decenas.
+    #
+    # Antes se hacía DENTRO del callback del ratón, y ese es el motivo de
+    # que a veces se perdieran pulsaciones: Windows tiene un tiempo máximo
+    # para los enganches de bajo nivel y, si se supera, DESENGANCHA el
+    # hook sin avisar. A partir de ahí la grabación sigue "en marcha" en
+    # la pantalla pero ya no capta nada. Aunque no se llegue al límite, un
+    # callback lento hace que el sistema descarte eventos.
+    #
+    # Ahora el callback solo apunta las coordenadas y sale; la captura la
+    # hace este hilo unos milisegundos después. Se pierde un pelín de
+    # inmediatez (la pantalla podría haber empezado a repintarse), pero
+    # una miniatura imperfecta es un respaldo menos, mientras que un clic
+    # perdido rompe la macro entera.
+    MINIATURAS_TIMEOUT_S = 10.0
+
+    def _arrancar_miniaturas(self) -> None:
+        import queue
+        self._cola_miniaturas = queue.Queue()
+        self._hilo_miniaturas = threading.Thread(
+            target=self._bucle_miniaturas, name="recorder-miniaturas", daemon=True,
+        )
+        self._hilo_miniaturas.start()
+
+    def _bucle_miniaturas(self) -> None:
+        from .image_match import capturar_region_png
+        cola = self._cola_miniaturas
+        while True:
+            try:
+                tarea = cola.get()
+            except Exception:
+                return
+            if tarea is None:
+                return
+            sobre, x, y = tarea
+            try:
+                sobre["png"] = capturar_region_png(x, y)
+            except Exception:
+                sobre["png"] = None
+
+    def _encolar_miniatura(self, x: int, y: int) -> dict:
+        """Apunta la captura y devuelve el sobre donde llegará."""
+        sobre: dict = {"png": None}
+        cola = getattr(self, "_cola_miniaturas", None)
+        if cola is not None:
+            try:
+                cola.put((sobre, int(x), int(y)))
+            except Exception:
+                pass
+        return sobre
+
+    def _parar_miniaturas(self) -> None:
+        cola = getattr(self, "_cola_miniaturas", None)
+        hilo = getattr(self, "_hilo_miniaturas", None)
+        if cola is None or hilo is None:
+            return
+        try:
+            cola.put(None)
+            hilo.join(timeout=self.MINIATURAS_TIMEOUT_S)
+        except Exception:
+            pass
+        self._cola_miniaturas = None
+        self._hilo_miniaturas = None
 
     # ---- Resolución EN VIVO del elemento clicado ----
     #
@@ -670,6 +764,7 @@ class Recorder:
                 logger.debug("Fallo al esperar (join) a un listener de captura: {}", exc)
         self._mouse_listener = None
         self._kb_listener = None
+        self._parar_miniaturas()
         self._parar_resolutor()
         with self._lock:
             self._flush_text()
@@ -717,28 +812,33 @@ class Recorder:
             # panel flotante...): no es parte de la macro. Si había un
             # press pendiente (arrastre que termina sobre el panel), se
             # descarta también.
+            #
+            # Se CUENTAN porque son una causa real de "he pulsado y no lo
+            # ha grabado": si el panel flotante tapa el botón que quieres
+            # pulsar, el clic desaparece sin decir nada. El contador sale
+            # en la ventana de grabación para que se vea al momento.
             with self._lock:
                 self._press_pendiente = None
+                if pressed:
+                    self.clics_descartados += 1
+                    logger.info(
+                        "Clic en ({},{}) descartado: cae sobre una ventana de "
+                        "MemoviPro. Aparta el panel si tapa lo que quieres pulsar.",
+                        int(x), int(y),
+                    )
             return
         btn = _button_corto(button)
         if pressed:
-            # Capturar el thumbnail alrededor del punto ANTES del efecto del
-            # clic (best-effort, rápido). Se usará como fallback de matching
-            # por imagen al reproducir. Solo se conserva si el evento acaba
-            # siendo un click (no un drag).
-            img = None
-            try:
-                from .image_match import capturar_region_png
-                img = capturar_region_png(int(x), int(y))
-            except Exception:
-                img = None
+            # Encolar la miniatura para que la capture OTRO hilo. Aquí
+            # dentro no se puede: ver _arrancar_miniaturas.
+            sobre = self._encolar_miniatura(int(x), int(y))
             with self._lock:
                 self._press_pendiente = {
                     "x": int(x), "y": int(y),
                     "button": btn,
                     "modifiers": _modifiers_str(self._modifiers),
                     "timestamp": time.time(),
-                    "img_png": img,
+                    "img_holder": sobre,
                 }
             return
         # ----- Release -----
@@ -788,7 +888,7 @@ class Recorder:
             modifiers=mods,
             descripcion=self._descripcion_click(x, y, btn, mods, double=False),
             timestamp=ahora,
-            img_png=pendiente.get("img_png"),
+            img_holder=pendiente.get("img_holder"),
         )
         self.eventos_crudos.append(evt)
         # Resolver YA, con la pantalla como está ahora (en otro hilo, para
@@ -1087,11 +1187,16 @@ class Recorder:
                 mods_label = evt.modifiers.upper() + " " if evt.modifiers else ""
                 accion = "Doble click" if evt.double else "Click"
                 btn_suffix = "" if evt.button == "left" else f" [{evt.button}]"
+                # La miniatura puede venir directa (grabaciones antiguas o
+                # tests) o dentro del sobre que rellenó el hilo aparte.
+                png = evt.img_png
+                if png is None and evt.img_holder:
+                    png = evt.img_holder.get("png")
                 img_b64 = ""
-                if evt.img_png:
+                if png:
                     try:
                         from .image_match import png_a_b64
-                        img_b64 = png_a_b64(evt.img_png)
+                        img_b64 = png_a_b64(png)
                     except Exception:
                         img_b64 = ""
                 if sel is not None:
