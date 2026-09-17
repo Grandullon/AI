@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .about_panel import AboutPanel
+from .theme import APP_STYLE
 from .dashboard_panel import DashboardPanel
 from .incidents_view import IncidentsView
 from .pipeline_panel import PipelinePanel
@@ -23,58 +24,6 @@ from .schedule_panel import SchedulePanel
 from .secrets_panel import SecretsPanel
 from .step_editor import StepEditor
 
-APP_STYLE = """
-QMainWindow, QDialog, QWidget { background-color: #f0f4f8; color: #2c3e50; }
-QTabWidget::pane { border: 1px solid #bdc3c7; border-radius: 4px; background: #f0f4f8; }
-QTabBar::tab {
-    background: #ecf0f1; color: #2c3e50;
-    padding: 8px 16px; border: 1px solid #bdc3c7;
-    border-bottom: none; border-top-left-radius: 4px; border-top-right-radius: 4px;
-}
-QTabBar::tab:selected { background: #3498db; color: white; }
-QTabBar::tab:!selected:hover { background: #d6dbdf; }
-QPushButton {
-    background-color: #3498db; color: white; border: none;
-    padding: 8px 16px; font-size: 14px; border-radius: 4px;
-}
-QPushButton:hover { background-color: #2980b9; }
-QPushButton:disabled { background-color: #bdc3c7; color: #7f8c8d; }
-QLabel { font-size: 14px; color: #2c3e50; background: transparent; }
-QLineEdit, QComboBox, QSpinBox, QTimeEdit, QTextEdit, QPlainTextEdit {
-    background: white; color: #2c3e50;
-    border: 1px solid #bdc3c7; padding: 4px;
-    border-radius: 3px;
-    selection-background-color: #3498db; selection-color: white;
-}
-QComboBox QAbstractItemView {
-    background: white; color: #2c3e50;
-    selection-background-color: #3498db; selection-color: white;
-}
-QTableWidget, QListWidget {
-    background-color: white; color: #2c3e50;
-    border: 1px solid #bdc3c7; gridline-color: #ecf0f1;
-    alternate-background-color: #fafbfc;
-    selection-background-color: #3498db; selection-color: white;
-}
-QTableWidget::item, QListWidget::item { color: #2c3e50; }
-QTableWidget::item:selected, QListWidget::item:selected {
-    background-color: #3498db; color: white;
-}
-QHeaderView::section {
-    background-color: #2c3e50; color: white;
-    padding: 6px; border: 1px solid #34495e; font-weight: bold;
-}
-QHeaderView { background-color: #2c3e50; }
-QProgressBar {
-    border: 2px solid #3498db; border-radius: 5px; text-align: center;
-    background: white; color: #2c3e50;
-}
-QProgressBar::chunk { background-color: #3498db; }
-QStatusBar { color: #2c3e50; background: #ecf0f1; }
-QCheckBox { color: #2c3e50; background: transparent; }
-QMessageBox { background-color: #f0f4f8; color: #2c3e50; }
-QMessageBox QLabel { color: #2c3e50; }
-"""
 
 
 def _version() -> str:
@@ -93,9 +42,10 @@ class MainWindow(QMainWindow):
         self.macros_dir = macros_dir
         self.pipelines_dir = pipelines_dir or (macros_dir.parent / "pipelines")
         self.pipelines_dir.mkdir(parents=True, exist_ok=True)
-        self.setWindowTitle("MemoviPro — Automatización IT")
+        self.setWindowTitle("MemoviPro — Automatización de tareas")
         # La autoría vive en la pestaña "ℹ" (ui/about_panel.py).
-        self.setGeometry(100, 100, 1100, 700)
+        self.setGeometry(100, 100, 1280, 780)
+        self.setMinimumSize(1060, 640)
         self.setStyleSheet(APP_STYLE)
 
         central = QWidget()
@@ -128,18 +78,20 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.step_editor, "Macros")
         self.tabs.addTab(self.replay_panel, "Reproducir")
         self.tabs.addTab(self.pipeline_panel, "Cadenas")
-        self.tabs.addTab(self.run_panel, "Ejecutar (por DNI)")
+        self.tabs.addTab(self.run_panel, "Ejecutar por lista")
         self.tabs.addTab(self.schedule_panel, "Programación")
-        self.tabs.addTab(self.secrets_panel, "Secretos")
+        self.tabs.addTab(self.secrets_panel, "Credenciales")
         self.tabs.addTab(self.incidents_view, "Incidencias")
-        self.tabs.addTab(self.dashboard_panel, "Dashboard")
-        self.tabs.addTab(self.about_panel, "ℹ")
+        self.tabs.addTab(self.dashboard_panel, "Resumen")
+        self.tabs.addTab(self.about_panel, "Acerca de")
         self.tabs.setTabToolTip(
-            self.tabs.count() - 1, "Acerca de MemoviPro")
+            self.tabs.count() - 1,
+            "Autoría, licencia y cómo funciona")
         layout.addWidget(self.tabs)
 
         self.setStatusBar(QStatusBar())
-        self.statusBar().showMessage("Listo")
+        self.statusBar().showMessage(
+            "Listo  ·  Ctrl+Alt+Esc detiene cualquier ejecución")
 
         panic = QShortcut(QKeySequence("Ctrl+Alt+Esc"), self)
         panic.activated.connect(self._panic)

@@ -13,6 +13,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('config.json', '.'),
+        ('LICENSE', '.'),
         ('macros', 'macros'),
         ('pipelines', 'pipelines'),
     ],

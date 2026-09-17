@@ -30,7 +30,7 @@ class IncidentsView(QWidget):
 
         top = QHBoxLayout()
         self.file_combo = QComboBox()
-        refresh = QPushButton("↻ Refrescar")
+        refresh = QPushButton("↻  Refrescar")
         refresh.clicked.connect(self.refresh)
         abrir = QPushButton("Abrir Excel")
         abrir.clicked.connect(self._open_excel)

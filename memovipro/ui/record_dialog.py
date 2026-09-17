@@ -124,7 +124,7 @@ class RecordDialog(QDialog):
 
         btns = QHBoxLayout()
         btns.addStretch()
-        self.btn_detener = QPushButton("⏹ Detener (F9)")
+        self.btn_detener = QPushButton("⏹  Detener (F9)")
         self.btn_detener.setEnabled(False)
         self.btn_detener.clicked.connect(self._stop)
         btns.addWidget(self.btn_detener)

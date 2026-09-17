@@ -322,7 +322,7 @@ class SchedulePanel(QWidget):
             ("🟢/🔴 Habilitar/Deshabilitar", self._toggle_habilitar_seleccionada, None),
             ("📂 Logs hoy", self._abrir_logs_hoy, None),
             ("✕ Eliminar", self._eliminar_seleccionada, "#c0392b"),
-            ("↻ Refrescar", self.refresh_tareas, None),
+            ("↻  Refrescar", self.refresh_tareas, None),
         ]:
             b = QPushButton(txt)
             if color:

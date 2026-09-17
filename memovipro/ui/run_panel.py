@@ -24,6 +24,8 @@ from core.notifier import SmtpConfig
 from core.runner import MacroRunner, RunSummary
 from core.step_model import Macro
 
+from .theme import aplicar_tono
+
 
 def _cargar_smtp(config_path: Path) -> tuple[SmtpConfig | None, bool]:
     """Devuelve (config, enviar_al_terminar) leyendo config.json.
@@ -95,7 +97,11 @@ class RunPanel(QWidget):
         macro_row = QHBoxLayout()
         self.macro_combo = QComboBox()
         self.refresh_btn = QPushButton("↻")
-        self.refresh_btn.setMaximumWidth(40)
+        # Botón cuadrado: con maximumWidth a secas, el relleno del estilo
+        # dejaba el símbolo cortado.
+        self.refresh_btn.setFixedSize(34, 32)
+        aplicar_tono(self.refresh_btn, "icono")
+        self.refresh_btn.setToolTip("Volver a leer la lista de macros")
         self.refresh_btn.clicked.connect(self.refresh_macros)
         macro_row.addWidget(QLabel("Macro:"))
         macro_row.addWidget(self.macro_combo, 1)

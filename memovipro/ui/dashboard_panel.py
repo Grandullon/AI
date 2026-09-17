@@ -33,7 +33,7 @@ class DashboardPanel(QWidget):
         layout = QVBoxLayout(self)
 
         cab = QHBoxLayout()
-        cab.addWidget(QLabel("<b>Dashboard de ejecuciones</b>"))
+        cab.addWidget(QLabel("<b>Resumen de ejecuciones</b>"))
         cab.addStretch()
         cab.addWidget(QLabel("Últimos:"))
         self.dias_combo = QComboBox()
@@ -44,7 +44,7 @@ class DashboardPanel(QWidget):
         self.dias_combo.setCurrentIndex(1)
         self.dias_combo.currentIndexChanged.connect(self.refresh)
         cab.addWidget(self.dias_combo)
-        refrescar = QPushButton("↻ Refrescar")
+        refrescar = QPushButton("↻  Refrescar")
         refrescar.clicked.connect(self.refresh)
         cab.addWidget(refrescar)
         layout.addLayout(cab)

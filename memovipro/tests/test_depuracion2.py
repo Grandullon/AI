@@ -491,7 +491,7 @@ def test_replay_runner_propaga_skip_y_repeat():
 def test_panel_tiene_botones_y_atajos():
     src = (ROOT / "ui" / "step_through_panel.py").read_text(encoding="utf-8")
     # Botones nuevos
-    for marca in ("⏭ F4", "🔁 F12", "✏️ Editar"):
+    for marca in ("⏭  Saltar", "🔁  Repetir", "✏️  Editar"):
         assert marca in src
     # Atajos globales nuevos
     assert '_pynput_keyboard.Key.f4: "skip"' in src

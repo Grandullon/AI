@@ -7,6 +7,7 @@ from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QFrame,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -25,6 +26,7 @@ from core.step_model import Macro, SalidaConfig, Selector, Step, StepType
 from core.textos import confirmar_borrado
 
 from .inspector import CapturaSelector, Inspector
+from .theme import aplicar_tono
 from .record_dialog import RecordDialog
 
 
@@ -78,6 +80,9 @@ class StepEditor(QWidget):
         top.addWidget(self.nombre)
         top.addWidget(QLabel("Ventana:"))
         top.addWidget(self.ventana, 1)
+        top.addSpacing(8)
+        top.addWidget(self._boton("Cargar", self._load, None))
+        top.addWidget(self._boton("💾  Guardar", self._save, "primario"))
         layout.addLayout(top)
 
         salida = QHBoxLayout()
@@ -115,38 +120,67 @@ class StepEditor(QWidget):
             at.activated.connect(accion)
         layout.addWidget(self.tabla, 1)
 
-        botones = QHBoxLayout()
-        botones_def = [
-            ("🔴 Grabar", self._launch_recorder, "#c0392b"),
-            ("Añadir paso", self._add_step, None),
-            ("Editar valor", self._edit_value, None),
-            ("✓ Verificación", self._edit_verificacion, None),
-            ("Eliminar (Supr)", self._remove_step, None),
-            ("↶ Deshacer", self._deshacer, None),
-            ("🔎 Revisar macro", self._revisar_macro, "#16a085"),
-            ("Subir", lambda: self._move(-1), None),
-            ("Bajar", lambda: self._move(1), None),
-            ("Inspector", self._launch_inspector, None),
-            ("⚡ Plantilla arranque", self._insertar_plantilla_arranque, "#8e44ad"),
-            ("🔴 Punto análisis", self._toggle_breakpoint, "#7f2d2d"),
-            ("⏸ Activar/Desactivar", self._toggle_activo, "#7f8c8d"),
-            ("🐞 Paso a paso", self._launch_step_through, "#16a085"),
-            ("▶ Hasta aquí", self._run_hasta_aqui, "#2980b9"),
-            ("▶ Desde aquí", self._run_desde_aqui, "#2980b9"),
-            ("Cargar YAML", self._load, None),
-            ("Guardar YAML", self._save, None),
+        # Los botones van en TRES filas agrupadas por tarea. Antes eran
+        # dieciocho en una sola fila: Qt los encogía por debajo de su
+        # texto y las etiquetas salían cortadas.
+        filas_botones = [
+            # Construir la macro
+            [[("🔴  Grabar", self._launch_recorder, "peligro"),
+              ("Añadir paso", self._add_step, None),
+              ("Editar valor", self._edit_value, None),
+              ("Verificación", self._edit_verificacion, None)],
+             [("Inspector", self._launch_inspector, None),
+              ("⚡  Plantilla de arranque", self._insertar_plantilla_arranque,
+               "herramienta")]],
+            # Organizar los pasos
+            [[("Eliminar", self._remove_step, None),
+              ("↶  Deshacer", self._deshacer, None)],
+             [("Subir", lambda: self._move(-1), None),
+              ("Bajar", lambda: self._move(1), None),
+              ("Activar / Desactivar", self._toggle_activo, None)]],
+            # Comprobar, probar y guardar
+            [[("🔎  Revisar macro", self._revisar_macro, "herramienta")],
+             [("Punto de análisis", self._toggle_breakpoint, None),
+              ("🐞  Paso a paso", self._launch_step_through, "depurar"),
+              ("▶  Hasta aquí", self._run_hasta_aqui, None),
+              ("▶  Desde aquí", self._run_desde_aqui, None)],
+             ],
         ]
-        for txt, slot, color in botones_def:
-            b = QPushButton(txt)
-            if color:
-                b.setStyleSheet(f"background-color: {color}; color: white; font-weight: bold;")
-            b.clicked.connect(slot)
-            botones.addWidget(b)
-        layout.addLayout(botones)
+        for grupos in filas_botones:
+            fila = QHBoxLayout()
+            fila.setSpacing(6)
+            for n, grupo in enumerate(grupos):
+                if n:
+                    fila.addWidget(self._separador())
+                for txt, slot, tono in grupo:
+                    fila.addWidget(self._boton(txt, slot, tono))
+            fila.addStretch()
+            layout.addLayout(fila)
 
         self._inspector = Inspector()
         self._inspector.captured.connect(self._on_inspect_captured)
         self._inspector.error.connect(self._on_inspect_error)
+
+    @staticmethod
+    def _boton(texto: str, slot, tono: str | None) -> QPushButton:
+        """Botón que nunca se encoge por debajo de su etiqueta.
+
+        Sin el mínimo, Qt reparte el ancho sobrante recortando los textos
+        y acaban leyéndose a medias."""
+        b = QPushButton(texto)
+        if tono:
+            aplicar_tono(b, tono)
+        b.clicked.connect(slot)
+        b.setMinimumWidth(b.sizeHint().width())
+        return b
+
+    @staticmethod
+    def _separador() -> QFrame:
+        """Línea fina que separa grupos de botones."""
+        linea = QFrame()
+        linea.setFrameShape(QFrame.Shape.VLine)
+        linea.setStyleSheet("color: #d4dae2;")
+        return linea
 
     def _refresh_table(self):
         # Recordar el paso resaltado para reaplicar el highlight tras refrescar

@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import QApplication
 
 from core.bootstrap import ensure_runtime_folders
 from core.log_config import setup_logging
+from ui.login_dialog import LoginDialog
 from ui.main_window import MainWindow
 
 
@@ -41,7 +42,22 @@ def main() -> int:
     logger.info("Bootstrap: {}", info)
 
     app = QApplication(sys.argv)
+    app.setApplicationName("MemoviPro")
+    app.setOrganizationName("Francisco J. Vidal Gázquez")
+
+    # Acceso antes que nada: si se cancela, no se abre la aplicación.
+    login = LoginDialog(data_dir=data_dir)
+    if login.exec() != LoginDialog.DialogCode.Accepted:
+        logger.info("Acceso cancelado: se cierra")
+        return 0
+    logger.info("Sesión iniciada por '{}'", login.usuario_autenticado)
+
     win = MainWindow(data_dir=data_dir, macros_dir=macros_dir, pipelines_dir=pipelines_dir)
+    win.usuario = login.usuario_autenticado
+    win.statusBar().showMessage(
+        f"Sesión de {login.usuario_autenticado}  ·  "
+        "Ctrl+Alt+Esc detiene cualquier ejecución"
+    )
     win.show()
     return app.exec()
 

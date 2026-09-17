@@ -198,10 +198,10 @@ class PipelinePanel(QWidget):
 
         # Ejecución
         ejec = QHBoxLayout()
-        self.run_btn = QPushButton("▶ Ejecutar cadena")
+        self.run_btn = QPushButton("▶  Ejecutar cadena")
         self.run_btn.setStyleSheet("background-color: #27ae60; font-weight: bold;")
         self.run_btn.clicked.connect(self._start)
-        self.stop_btn = QPushButton("⏹ Detener")
+        self.stop_btn = QPushButton("⏹  Detener")
         self.stop_btn.setStyleSheet("background-color: #c0392b; font-weight: bold;")
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.abort)

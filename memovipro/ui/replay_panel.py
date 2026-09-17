@@ -32,6 +32,8 @@ from core.player import RunStatus
 from core.replay_runner import ReplayRunner, ReplaySummary
 from core.step_model import Macro
 
+from .theme import aplicar_tono
+
 from .control_window import ControlWindow
 
 
@@ -91,7 +93,11 @@ class ReplayPanel(QWidget):
         fila_macro = QHBoxLayout()
         self.macro_combo = QComboBox()
         self.refresh_btn = QPushButton("↻")
-        self.refresh_btn.setMaximumWidth(40)
+        # Botón cuadrado: con maximumWidth a secas, el relleno del estilo
+        # dejaba el símbolo cortado.
+        self.refresh_btn.setFixedSize(34, 32)
+        aplicar_tono(self.refresh_btn, "icono")
+        self.refresh_btn.setToolTip("Volver a leer la lista de macros")
         self.refresh_btn.clicked.connect(self.refresh_macros)
         fila_macro.addWidget(QLabel("Macro:"))
         fila_macro.addWidget(self.macro_combo, 1)
@@ -122,10 +128,10 @@ class ReplayPanel(QWidget):
         layout.addWidget(self.watchdog_chk)
 
         botones = QHBoxLayout()
-        self.run_btn = QPushButton("▶ Ejecutar")
+        self.run_btn = QPushButton("▶  Ejecutar")
         self.run_btn.setStyleSheet("background-color: #27ae60; font-weight: bold;")
         self.run_btn.clicked.connect(self._start)
-        self.stop_btn = QPushButton("⏹ Detener")
+        self.stop_btn = QPushButton("⏹  Detener")
         self.stop_btn.setEnabled(False)
         self.stop_btn.setStyleSheet("background-color: #c0392b; font-weight: bold;")
         self.stop_btn.clicked.connect(self.abort)

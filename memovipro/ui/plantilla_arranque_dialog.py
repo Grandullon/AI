@@ -56,7 +56,7 @@ class PlantillaArranqueDialog(QDialog):
         self.ventanas_combo = QComboBox()
         self.ventanas_combo.setMinimumWidth(420)
         fila_combo.addWidget(self.ventanas_combo, 1)
-        refresh_btn = QPushButton("🔄 Refrescar")
+        refresh_btn = QPushButton("🔄  Refrescar")
         refresh_btn.clicked.connect(self._refresh_ventanas)
         fila_combo.addWidget(refresh_btn)
         layout.addLayout(fila_combo)
@@ -73,7 +73,7 @@ class PlantillaArranqueDialog(QDialog):
 
         # Botón probar
         fila_probar = QHBoxLayout()
-        probar_btn = QPushButton("🔍 Probar patrón ahora")
+        probar_btn = QPushButton("🔍  Probar patrón ahora")
         probar_btn.clicked.connect(self._probar)
         probar_btn.setStyleSheet("background-color: #3498db; color: white; font-weight: bold;")
         fila_probar.addWidget(probar_btn)

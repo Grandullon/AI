@@ -6,18 +6,21 @@ from PyQt6.QtWidgets import QLabel, QScrollArea, QVBoxLayout, QWidget
 
 AUTOR = "Francisco J. Vidal Gázquez"
 
-ESTILO = """
-QWidget#AboutRoot { background: #f0f4f8; }
-QLabel#marca {
-    font-size: 30px; font-weight: bold; color: #2c3e50;
-}
-QLabel#autor {
-    font-size: 17px; color: #ffffff; background-color: #2c3e50;
-    border-radius: 6px; padding: 14px 18px;
-}
-QLabel#seccion { font-size: 15px; font-weight: bold; color: #2980b9; }
-QLabel#cuerpo { font-size: 13px; color: #34495e; }
-QLabel#pie { font-size: 11px; color: #7f8c8d; }
+from .theme import AZUL, BLANCO, LIENZO, PIZARRA, TEXTO, TEXTO_SUAVE
+
+ESTILO = f"""
+QWidget#AboutRoot {{ background: {LIENZO}; }}
+QLabel#marca {{ font-size: 32px; font-weight: 700; color: {PIZARRA}; }}
+QLabel#autor {{
+    font-size: 15px; color: {BLANCO}; background-color: {PIZARRA};
+    border-radius: 8px; padding: 18px 22px;
+}}
+QLabel#seccion {{
+    font-size: 11px; font-weight: 700; color: {AZUL};
+    letter-spacing: 0.8px;
+}}
+QLabel#cuerpo {{ font-size: 13px; color: {TEXTO}; line-height: 150%; }}
+QLabel#pie {{ font-size: 11px; color: {TEXTO_SUAVE}; }}
 """
 
 
@@ -54,7 +57,7 @@ class AboutPanel(QWidget):
             col.addWidget(v)
 
         col.addSpacing(16)
-        col.addWidget(self._seccion("Qué hace"))
+        col.addWidget(self._seccion("QUÉ HACE"))
         col.addWidget(self._texto(
             "Graba lo que haces con el ratón y el teclado sobre una "
             "aplicación y lo repite tantas veces como haga falta, sobre "
@@ -63,7 +66,7 @@ class AboutPanel(QWidget):
             "automatizarse por sí solas."
         ))
 
-        col.addWidget(self._seccion("Cómo encuentra las cosas en pantalla"))
+        col.addWidget(self._seccion("CÓMO ENCUENTRA LAS COSAS EN PANTALLA"))
         col.addWidget(self._texto(
             "Al grabar no guarda solo la posición del ratón: identifica el "
             "elemento en el árbol de accesibilidad de Windows, anota el "
@@ -74,7 +77,7 @@ class AboutPanel(QWidget):
             "ventana haya cambiado de sitio."
         ))
 
-        col.addWidget(self._seccion("Herramientas"))
+        col.addWidget(self._seccion("HERRAMIENTAS"))
         col.addWidget(self._texto(
             "Modo depuración paso a paso con puntos de análisis, grabación "
             "de pasos sueltos en mitad de un proceso, cadenas de macros, "
@@ -82,14 +85,46 @@ class AboutPanel(QWidget):
             "reanudación desde donde se quedó."
         ))
 
+        col.addSpacing(14)
+        col.addWidget(self._seccion("ACCESO"))
+        col.addWidget(self._texto(
+            "La pantalla de entrada evita que alguien use el programa si "
+            "te levantas del sitio. No cifra nada: quien tenga acceso a "
+            "los ficheros del equipo puede llegar a las macros y a los "
+            "registros por su cuenta. Si manejas datos de pacientes, la "
+            "protección de verdad es la del equipo — sesión de Windows "
+            "bloqueada y disco cifrado.\n\n"
+            "Las contraseñas se guardan cifradas de forma irreversible. "
+            "Si se olvida una que se haya cambiado, basta con borrar el "
+            "archivo «usuarios.json» de la carpeta data para volver a las "
+            "de origen."
+        ))
+
         col.addSpacing(18)
-        pie = QLabel(
-            "Herramienta de uso personal. Quien la utilice es responsable "
-            "de lo que automatice con ella y de los datos que maneje."
-        )
-        pie.setObjectName("pie")
-        pie.setWordWrap(True)
-        col.addWidget(pie)
+        col.addWidget(self._seccion("LICENCIA Y DERECHOS"))
+        col.addWidget(self._texto(
+            f"© 2026 {AUTOR}. <b>Todos los derechos reservados.</b><br><br>"
+            "Este programa, su código y su diseño son obra original del "
+            "autor, que ostenta su titularidad y todos los derechos de "
+            "explotación conforme al texto refundido de la Ley de "
+            "Propiedad Intelectual (Real Decreto Legislativo 1/1996).<br><br>"
+            "Queda prohibida sin autorización previa y por escrito su "
+            "copia, distribución, modificación, cesión a terceros o "
+            "ingeniería inversa, así como la retirada o alteración de este "
+            "aviso de autoría. El texto completo está en el archivo "
+            "<b>LICENSE</b> que acompaña al programa.",
+            rico=True,
+        ))
+
+        col.addSpacing(14)
+        col.addWidget(self._seccion("RESPONSABILIDAD"))
+        col.addWidget(self._texto(
+            "El programa se entrega «tal cual», sin garantía de ningún "
+            "tipo. Automatiza acciones de teclado y ratón sobre otras "
+            "aplicaciones: quien lo utiliza es responsable de las tareas "
+            "que automatice, de tener autorización para operar sobre esos "
+            "sistemas y del tratamiento de los datos que maneje."
+        ))
         col.addStretch()
 
         scroll = QScrollArea()
@@ -108,8 +143,10 @@ class AboutPanel(QWidget):
         return lab
 
     @staticmethod
-    def _texto(texto: str) -> QLabel:
+    def _texto(texto: str, rico: bool = False) -> QLabel:
         lab = QLabel(texto)
         lab.setObjectName("cuerpo")
         lab.setWordWrap(True)
+        if rico:
+            lab.setTextFormat(Qt.TextFormat.RichText)
         return lab

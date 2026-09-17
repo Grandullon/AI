@@ -69,7 +69,7 @@ class SecretsPanel(QWidget):
             ("Añadir / Sobrescribir", self._add_or_replace),
             ("Probar (resolver y mostrar longitud)", self._test_secret),
             ("Eliminar", self._delete),
-            ("↻ Refrescar", self.refresh),
+            ("↻  Refrescar", self.refresh),
         ]:
             b = QPushButton(txt)
             b.clicked.connect(slot)
