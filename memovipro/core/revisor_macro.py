@@ -97,6 +97,24 @@ def _clic_a_ciegas(paso: Step) -> bool:
     return not (win_rel.get("w") or extra.get("img_b64") or extra.get("texto_ancla"))
 
 
+def _apunta_a_celda_de_columna(paso: Step) -> bool:
+    """¿El paso apunta a una celda de propiedad en vez de a la fila?
+
+    En listas y tablas, el punto exacto donde se clica es una celda que
+    se llama como la COLUMNA ("Nombre"), no como el dato. Un selector así
+    casa con la celda de cualquier fila: al reproducir se abre el
+    elemento equivocado. Las marcas delatoras son el identificador
+    `System.*` y la clase `UIProperty`, ambas del Explorador de Windows y
+    de los controles de lista que usan el mismo modelo.
+    """
+    sel = paso.selector
+    if sel is None or sel.is_empty():
+        return False
+    if (sel.class_name or "") == "UIProperty":
+        return True
+    return (sel.auto_id or "").startswith("System.")
+
+
 def revisar(macro: Macro) -> Informe:
     """Repasa la macro entera y devuelve el informe."""
     inf = Informe()
@@ -134,6 +152,16 @@ def revisar(macro: Macro) -> Informe:
 
         if _clic_a_ciegas(paso):
             a_ciegas.append(i)
+
+        if _apunta_a_celda_de_columna(paso):
+            inf.avisos.append(Aviso(
+                ALTO, i, "Apunta a la columna, no a la fila",
+                f"Este paso guarda «{paso.selector.name}», que es el "
+                "título de una columna y no el elemento que clicaste. Al "
+                "reproducir casaría con esa celda en CUALQUIER fila, así "
+                "que abriría lo que no toca. Vuelve a grabar el paso: las "
+                "grabaciones nuevas ya se quedan con la fila.",
+            ))
 
         if paso.tipo == StepType.CLICK_CONTROL and (
             paso.selector is None or paso.selector.is_empty()

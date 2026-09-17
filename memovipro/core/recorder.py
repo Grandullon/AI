@@ -417,6 +417,56 @@ def _ancla_vecina(elem, x: int, y: int) -> dict | None:
     return mejor
 
 
+# Tipos de control que representan UNA FILA/ELEMENTO de una lista, un
+# árbol o una tabla. El nombre que identifica la cosa está en ellos.
+_CONTENEDORES_ITEM = {"ListItem", "TreeItem", "DataItem", "TableItem"}
+
+
+def _elemento_significativo(elem):
+    """Sube de una CELDA a la fila que la contiene.
+
+    En listas y tablas (el Explorador de Windows es el ejemplo claro),
+    el punto exacto donde clicas no es la fila sino una celda de
+    propiedad. Esa celda se llama como la COLUMNA, no como el dato: al
+    clicar en la carpeta "macros" lo que hay justo debajo del ratón es un
+    control llamado "Nombre" (el título de la columna), con identificador
+    `System.ItemNameDisplay`. Así que la macro guardaba "Click en Nombre"
+    y, al reproducir, ese selector casaba con la celda de nombre de
+    CUALQUIER fila — es decir, abría el archivo equivocado.
+
+    La fila que la contiene sí se llama "macros". Subimos hasta ella.
+
+    Es un cambio acotado: solo actúa si hay una fila de lista/árbol/tabla
+    por encima. Un campo de un formulario normal no tiene ninguna, así
+    que no se toca nada.
+    """
+    if elem is None:
+        return elem
+    try:
+        if elem.element_info.control_type in _CONTENEDORES_ITEM:
+            return elem            # ya estamos en la fila
+    except Exception:
+        return elem
+    actual = elem
+    for _ in range(3):             # la celda suele estar a 1-2 niveles
+        try:
+            actual = actual.parent()
+        except Exception:
+            return elem
+        if actual is None:
+            return elem
+        try:
+            if actual.element_info.control_type not in _CONTENEDORES_ITEM:
+                continue
+            # Solo merece la pena si la fila tiene nombre propio; si no,
+            # nos quedamos con el elemento original.
+            if (actual.window_text() or "").strip():
+                return actual
+        except Exception:
+            return elem
+    return elem
+
+
 def _selector_desde_punto(x: int, y: int):
     """Resuelve (x,y) a un selector simbólico + respaldos robustos.
 
@@ -432,7 +482,11 @@ def _selector_desde_punto(x: int, y: int):
         elem = Desktop(backend="uia").from_point(x, y)
     except Exception:
         return None, f"({x},{y})", None, None
+    # La posición de la ventana se calcula con el elemento ORIGINAL (es
+    # el que está bajo el ratón); la identidad, con la fila que lo
+    # contiene si la hay (ver _elemento_significativo).
     win_rel = _ventana_relativa_desde_punto(elem, x, y)
+    elem = _elemento_significativo(elem)
     ancla = _ancla_desde_punto(elem, x, y)
     try:
         name = (elem.window_text() or "").strip()
