@@ -564,9 +564,11 @@ class Player:
             self._wait_for_window(paso.titulo or "", paso.timeout_s)
             return
         if tipo == StepType.CLICK_CONTROL:
+            self._comprobar_foco_esperado(paso)
             self._click_control(paso)
             return
         if tipo == StepType.CLICK_AT_XY:
+            self._comprobar_foco_esperado(paso)
             self._click_at_xy(paso)
             return
         if tipo == StepType.TYPE_TEXT:
@@ -872,6 +874,49 @@ class Player:
                 last_err = exc
                 continue
         raise RuntimeError(f"No se encontró control {kwargs}: {last_err}")
+
+    def _comprobar_foco_esperado(self, paso: Step) -> None:
+        """¿Estoy donde creo? Antes de clicar, confirma que delante está
+        el MISMO programa en el que se grabó el paso.
+
+        Es la defensa que evita el peor escenario: que la aplicación haya
+        cambiado de pantalla, se haya cerrado o haya caducado la sesión, y
+        la macro siga clicando y tecleando sobre lo que hubiera detrás.
+
+        Si no coincide, primero intenta traer la ventana al frente (lo que
+        arregla el caso normal: otra ventana se puso encima). Solo si
+        después sigue sin coincidir, el paso falla — con un motivo que se
+        entiende — en vez de actuar a ciegas.
+
+        Los pasos grabados antes de esto no llevan el dato, así que no se
+        comprueba nada y se reproducen igual que siempre.
+        """
+        esperado = str(((paso.extra or {}).get("win_rel") or {}).get("proceso", ""))
+        if not esperado or self.dry_run:
+            return
+        from .proceso import mismo_programa, proceso_en_primer_plano
+        if mismo_programa(esperado, proceso_en_primer_plano()):
+            return
+        # Segundo intento: traer al frente la ventana de trabajo.
+        try:
+            titulo = (
+                self.macro.ventana_principal
+                or ((paso.extra or {}).get("win_rel") or {}).get("title", "")
+            )
+            if titulo:
+                from .window_utils import asegurar_ventana
+                asegurar_ventana(titulo)
+        except Exception as exc:
+            logger.debug("No se pudo reactivar la ventana esperada: {}", exc)
+        actual = proceso_en_primer_plano()
+        if mismo_programa(esperado, actual):
+            return
+        raise RuntimeError(
+            f"La ventana que hay delante no es la esperada: se grabó sobre "
+            f"'{esperado}' y ahora está '{actual or 'desconocido'}'. "
+            "El paso no se ejecuta para no actuar sobre la pantalla "
+            "equivocada."
+        )
 
     def _click_control(self, paso: Step) -> None:
         """Hace clic respetando una jerarquía de estrategias:

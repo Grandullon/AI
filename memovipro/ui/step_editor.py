@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.step_model import Macro, SalidaConfig, Selector, Step, StepType
+from core.textos import confirmar_borrado
 
 from .inspector import CapturaSelector, Inspector
 from .record_dialog import RecordDialog
@@ -106,6 +107,12 @@ class StepEditor(QWidget):
         borrar = QShortcut(QKeySequence.StandardKey.Delete, self.tabla)
         borrar.setContext(Qt.ShortcutContext.WidgetShortcut)
         borrar.activated.connect(self._remove_step)
+        for secuencia, accion in (
+            (QKeySequence.StandardKey.Undo, self._deshacer),
+            (QKeySequence.StandardKey.Redo, self._rehacer),
+        ):
+            at = QShortcut(secuencia, self)
+            at.activated.connect(accion)
         layout.addWidget(self.tabla, 1)
 
         botones = QHBoxLayout()
@@ -115,6 +122,8 @@ class StepEditor(QWidget):
             ("Editar valor", self._edit_value, None),
             ("✓ Verificación", self._edit_verificacion, None),
             ("Eliminar (Supr)", self._remove_step, None),
+            ("↶ Deshacer", self._deshacer, None),
+            ("🔎 Revisar macro", self._revisar_macro, "#16a085"),
             ("Subir", lambda: self._move(-1), None),
             ("Bajar", lambda: self._move(1), None),
             ("Inspector", self._launch_inspector, None),
@@ -264,6 +273,7 @@ class StepEditor(QWidget):
         tipo, ok = QInputDialog.getItem(self, "Tipo de paso", "Selecciona:", tipos, 0, False)
         if not ok:
             return
+        self._snapshot("añadir paso")
         nuevo = Step(tipo=StepType(tipo), descripcion=f"Nuevo {tipo}")
         # Insertar JUSTO DESPUÉS de la fila seleccionada (más intuitivo que
         # añadir siempre al final). Si no hay selección, va al final.
@@ -500,37 +510,114 @@ class StepEditor(QWidget):
                 filas = {row}
         return sorted(f for f in filas if 0 <= f < len(self.macro.pasos))
 
-    @staticmethod
-    def _texto_confirmar_borrado(filas: list[int]) -> str:
-        """Mensaje de confirmación que dice EXACTAMENTE qué se borra.
+    # ---- Deshacer / rehacer ----
+    #
+    # Guardamos una copia de los pasos ANTES de cada cambio. Es una copia
+    # profunda a propósito: los pasos llevan diccionarios dentro (`extra`)
+    # y una copia superficial dejaría que "deshacer" restaurase objetos
+    # que se habían modificado igualmente.
+    MAX_DESHACER = 40
 
-        Con una selección suelta (3, 7 y 40), decir "del 3 al 40" se lee
-        como un rango de 38 pasos. Listamos los números de verdad."""
-        nums = [f + 1 for f in filas]
-        if len(nums) == 1:
-            return f"¿Eliminar el paso {nums[0]}?"
-        contiguos = nums == list(range(nums[0], nums[-1] + 1))
-        if contiguos:
-            detalle = f"del {nums[0]} al {nums[-1]}"
-        elif len(nums) <= 12:
-            detalle = "los números " + ", ".join(str(n) for n in nums)
-        else:
-            detalle = ("los números " + ", ".join(str(n) for n in nums[:10])
-                       + f"… y {len(nums) - 10} más")
-        return f"¿Eliminar {len(nums)} pasos?\n\n({detalle})"
+    def _snapshot(self, que: str) -> None:
+        """Apunta el estado actual para poder deshacer este cambio."""
+        import copy
+        if not hasattr(self, "_pila_deshacer"):
+            self._pila_deshacer, self._pila_rehacer = [], []
+        self._pila_deshacer.append(
+            (que, copy.deepcopy(self.macro.pasos), set(self._breakpoints))
+        )
+        if len(self._pila_deshacer) > self.MAX_DESHACER:
+            self._pila_deshacer.pop(0)
+        # Un cambio nuevo invalida el camino de rehacer.
+        self._pila_rehacer = []
+
+    def _deshacer(self) -> None:
+        import copy
+        pila = getattr(self, "_pila_deshacer", None)
+        if not pila:
+            self._avisar_estado("No hay nada que deshacer.")
+            return
+        que, pasos, bps = pila.pop()
+        self._pila_rehacer.append(
+            (que, copy.deepcopy(self.macro.pasos), set(self._breakpoints))
+        )
+        self.macro.pasos = pasos
+        self._breakpoints = bps
+        self._refresh_table()
+        self._avisar_estado(f"Deshecho: {que}")
+
+    def _rehacer(self) -> None:
+        import copy
+        pila = getattr(self, "_pila_rehacer", None)
+        if not pila:
+            self._avisar_estado("No hay nada que rehacer.")
+            return
+        que, pasos, bps = pila.pop()
+        self._pila_deshacer.append(
+            (que, copy.deepcopy(self.macro.pasos), set(self._breakpoints))
+        )
+        self.macro.pasos = pasos
+        self._breakpoints = bps
+        self._refresh_table()
+        self._avisar_estado(f"Rehecho: {que}")
+
+    def _avisar_estado(self, texto: str) -> None:
+        try:
+            self.window().statusBar().showMessage(texto, 4000)
+        except Exception:
+            pass
+
+    def _revisar_macro(self) -> None:
+        """Repasa la macro y enseña los avisos (ver core/revisor_macro)."""
+        from core.revisor_macro import ALTO, MEDIO, revisar
+        inf = revisar(self.macro)
+        if not inf.avisos:
+            QMessageBox.information(
+                self, "Revisión de la macro",
+                "Todo correcto: no he encontrado nada que avisar.",
+            )
+            return
+        iconos = {ALTO: "🔴", MEDIO: "🟠"}
+        lineas = []
+        for a in inf.avisos:
+            donde = f"Paso {a.paso}" if a.paso else "La macro"
+            lineas.append(
+                f"{iconos.get(a.gravedad, '🔵')}  <b>{donde} — {a.titulo}</b>"
+                f"<br><span style='color:#555'>{a.detalle}</span>"
+            )
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Revisión de la macro")
+        msg.setIcon(
+            QMessageBox.Icon.Warning if inf.altos else QMessageBox.Icon.Information
+        )
+        msg.setText(f"<b>{inf.resumen()}</b>")
+        msg.setInformativeText("<br><br>".join(lineas))
+        msg.setTextFormat(Qt.TextFormat.RichText)
+        msg.exec()
+        # Dejar seleccionado el primer paso con problema, para ir a él.
+        primero = next((a for a in inf.avisos if a.paso), None)
+        if primero is not None:
+            fila = primero.paso - 1
+            if 0 <= fila < self.tabla.rowCount():
+                self.tabla.selectRow(fila)
+                item = self.tabla.item(fila, 0)
+                if item is not None:
+                    self.tabla.scrollToItem(item)
 
     def _remove_step(self):
         filas = self._filas_seleccionadas()
         if not filas:
             return
-        # Confirmar SIEMPRE: borrar no se puede deshacer, y con la tabla
-        # enfocada un Supr accidental se llevaba un paso sin decir nada.
+        # Confirmar SIEMPRE: con la tabla enfocada, un Supr accidental se
+        # llevaba un paso sin decir nada. (Y si aun así se cuela, ahora
+        # hay «↶ Deshacer» / Ctrl+Z.)
         if QMessageBox.question(
-            self, "Eliminar pasos", self._texto_confirmar_borrado(filas),
+            self, "Eliminar pasos", confirmar_borrado(filas),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         ) != QMessageBox.StandardButton.Yes:
             return
+        self._snapshot(f"eliminar {len(filas)} paso(s)")
         from core.debug_marks import shift_on_remove_varios
         # De mayor a menor: así los índices pendientes siguen siendo válidos.
         for row in reversed(filas):
@@ -549,6 +636,7 @@ class StepEditor(QWidget):
         new = row + delta
         if not 0 <= new < len(self.macro.pasos):
             return
+        self._snapshot("mover paso")
         self.macro.pasos[row], self.macro.pasos[new] = self.macro.pasos[new], self.macro.pasos[row]
         from core.debug_marks import swap_on_move
         self._breakpoints = swap_on_move(self._breakpoints, row, new)
@@ -687,6 +775,7 @@ class StepEditor(QWidget):
                 QMessageBox.StandardButton.No,
             ) != QMessageBox.StandardButton.Yes:
                 return
+            self._snapshot(f"activar/desactivar {len(filas)} paso(s)")
             for f in filas:
                 self.macro.pasos[f].activo = nuevo
             self._refresh_table()
@@ -738,6 +827,7 @@ class StepEditor(QWidget):
                 QMessageBox.StandardButton.No,
             ) != QMessageBox.StandardButton.Yes:
                 return
+        self._snapshot("activar/desactivar paso")
         paso.activo = not paso.activo
         self._refresh_table()
         self.tabla.selectRow(row)

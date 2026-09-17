@@ -293,8 +293,18 @@ def _ventana_relativa_desde_punto(elem, x: int, y: int) -> dict | None:
         # pura, siempre correcta) de "la ventana ha cambiado de tamaño",
         # donde escalar por fracciones se equivoca en las aplicaciones
         # Win32 clásicas, que anclan sus controles arriba-izquierda.
+        # Programa dueño de la ventana: lo usa la comprobación "¿estoy
+        # donde creo?" al reproducir. Va aquí porque ya tenemos el
+        # elemento de nivel superior resuelto.
+        proceso = ""
+        try:
+            from .proceso import nombre_proceso_de_hwnd
+            proceso = nombre_proceso_de_hwnd(top.handle)
+        except Exception:
+            proceso = ""
         return {
             "title": titulo,
+            "proceso": proceso,
             "fx": round(fx, 4), "fy": round(fy, 4),
             "w": int(w), "h": int(h),
             "dx": int(x - r.left), "dy": int(y - r.top),
