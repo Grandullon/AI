@@ -131,38 +131,81 @@ def test_tecla_desconocida_sigue_devolviendo_none():
 
 # ==================== modificadores "pegados" ====================
 
-def test_modificadores_pegados_se_descartan(monkeypatch):
-    """Si Windows dice que Alt ya no está pulsado, no debe seguir
-    convirtiendo todo lo que se teclea en atajos."""
+def _recorder_falso(mods, hace_segundos=0.0):
+    """Recorder mínimo con `mods` pulsados desde hace N segundos."""
+    import threading
+    import time as _t
     import core.recorder as rec
 
     r = Recorder.__new__(Recorder)
-    import threading
     r._lock = threading.Lock()
     r._grabando = True
-    r._modifiers = {"alt", "ctrl"}
+    r._modifiers = set(mods)
+    r._modifiers_desde = {m: _t.monotonic() - hace_segundos for m in mods}
     r._buf = rec._BufferTexto()
     r.eventos_crudos = []
+    return r
 
-    # El sistema dice que solo sigue pulsado Ctrl
+
+def test_modificadores_pegados_se_descartan(monkeypatch):
+    """Si Windows dice que Alt ya no está pulsado y llevamos un buen rato
+    creyendo que sí, es que se perdió la suelta."""
+    import core.recorder as rec
+
+    r = _recorder_falso({"alt", "ctrl"}, hace_segundos=60.0)
     monkeypatch.setattr(rec, "_modificadores_realmente_pulsados", lambda: {"ctrl"})
     r._on_press_impl(_TeclaFalsa("a"))
     assert r._modifiers == {"ctrl"}      # el Alt fantasma desapareció
-    # Y se grabó Ctrl+A, no Ctrl+Alt+A
+    assert r.eventos_crudos[-1].valor == "^a"   # Ctrl+A, no Ctrl+Alt+A
+
+
+def test_un_atajo_normal_no_se_rompe_aunque_el_sistema_no_lo_vea(monkeypatch):
+    """EL CASO QUE ROMPIÓ EL BUILD, y el riesgo de fondo.
+
+    La consulta al sistema lee el teclado FÍSICO. Hay escenarios
+    (escritorio remoto, teclados virtuales, entrada inyectada) donde
+    podría no ver una tecla que sí está pulsada. Si por eso
+    descartásemos el modificador, TODOS los atajos se grabarían como
+    texto suelto: Ctrl+A dejaría de ser un atajo y "a" se iría al buffer.
+
+    Por eso hace falta la segunda condición: llevar mucho rato pulsado.
+    Un atajo normal dura décimas de segundo."""
+    import core.recorder as rec
+
+    r = _recorder_falso({"ctrl"}, hace_segundos=0.2)
+    monkeypatch.setattr(rec, "_modificadores_realmente_pulsados", lambda: set())
+    r._on_press_impl(_TeclaFalsa("a"))
+    assert r._modifiers == {"ctrl"}             # NO se descarta
+    assert r.eventos_crudos[-1].valor == "^a"   # sigue siendo un atajo
+
+
+def test_sin_saber_cuando_se_pulso_no_se_descarta(monkeypatch):
+    """Si el estado se puso por otra vía y no hay marca de tiempo, no se
+    juzga: más vale no tocar que romper un atajo bueno."""
+    import core.recorder as rec
+
+    r = _recorder_falso({"ctrl"})
+    r._modifiers_desde = {}
+    monkeypatch.setattr(rec, "_modificadores_realmente_pulsados", lambda: set())
+    r._on_press_impl(_TeclaFalsa("a"))
+    assert r._modifiers == {"ctrl"}
     assert r.eventos_crudos[-1].valor == "^a"
+
+
+def test_soltar_la_tecla_borra_su_marca_de_tiempo():
+    """Si no, un Ctrl soltado y vuelto a pulsar arrastraría la hora del
+    primero y se descartaría antes de tiempo."""
+    r = _recorder_falso({"ctrl"}, hace_segundos=60.0)
+    r._on_release_impl(_TeclaEspecial("ctrl_l"))
+    assert r._modifiers == set()
+    assert r._modifiers_desde == {}
 
 
 def test_sin_windows_se_respeta_el_estado_propio(monkeypatch):
     """Fuera de Windows (o si la consulta falla) no se toca nada."""
     import core.recorder as rec
-    import threading
 
-    r = Recorder.__new__(Recorder)
-    r._lock = threading.Lock()
-    r._grabando = True
-    r._modifiers = {"alt"}
-    r._buf = rec._BufferTexto()
-    r.eventos_crudos = []
+    r = _recorder_falso({"alt"}, hace_segundos=999.0)
     monkeypatch.setattr(rec, "_modificadores_realmente_pulsados", lambda: None)
     r._on_press_impl(_TeclaFalsa("a"))
     assert r._modifiers == {"alt"}
@@ -173,14 +216,8 @@ def test_nunca_se_anaden_modificadores_que_no_vimos(monkeypatch):
     """Solo QUITAMOS modificadores fantasma; añadir los que el enganche no
     vio cambiaría el comportamiento cuando todo funciona bien."""
     import core.recorder as rec
-    import threading
 
-    r = Recorder.__new__(Recorder)
-    r._lock = threading.Lock()
-    r._grabando = True
-    r._modifiers = set()
-    r._buf = rec._BufferTexto()
-    r.eventos_crudos = []
+    r = _recorder_falso(set())
     monkeypatch.setattr(rec, "_modificadores_realmente_pulsados",
                         lambda: {"ctrl", "alt", "win"})
     r._on_press_impl(_TeclaFalsa("a"))

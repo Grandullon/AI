@@ -43,10 +43,10 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Tests rápidos (no bloquean si fallan los E2E)
+      - name: Tests
         run: |
           pip install pytest
-          pytest tests/ -v
+          pytest tests/ -q
         continue-on-error: false
 
       - name: Compilar memovipro-run.exe (CLI)

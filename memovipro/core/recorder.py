@@ -115,6 +115,17 @@ _VK_LATERALES = {
 }
 
 
+# Segundos que hay que llevar creyendo que un modificador está pulsado
+# antes de hacer caso a Windows y descartarlo. Es un seguro: la consulta
+# al sistema lee el teclado FÍSICO, y hay escenarios (escritorio remoto,
+# teclados virtuales, entrada inyectada por otro programa) donde podría
+# no reflejar una tecla que sí está pulsada de verdad. Con este margen,
+# una combinación normal —que dura décimas de segundo— nunca se ve
+# afectada aunque la consulta falle; solo se descarta lo que lleva
+# pegado tanto rato que ya no puede ser un atajo.
+UMBRAL_PEGADO_S = 10.0
+
+
 def _modificadores_realmente_pulsados() -> set[str] | None:
     """Qué modificadores están pulsados AHORA MISMO según Windows.
 
@@ -491,6 +502,7 @@ class Recorder:
         self.eventos_crudos = []
         self._buf = _BufferTexto()
         self._modifiers = set()
+        self._modifiers_desde = {}
         self._press_pendiente = None
         self._arrancar_resolutor()
         self._mouse_listener = mouse.Listener(
@@ -807,20 +819,16 @@ class Recorder:
         if mod is not None:
             with self._lock:
                 self._modifiers.add(mod)
+                # Cuándo empezó a estar pulsado (para detectar "pegados").
+                if not hasattr(self, "_modifiers_desde"):
+                    self._modifiers_desde = {}
+                # Reloj MONÓTONO: aquí medimos cuánto rato llevamos con la
+                # tecla pulsada, no a qué hora fue. Así no lo afecta un
+                # cambio de hora del sistema ni el horario de verano.
+                self._modifiers_desde.setdefault(mod, time.monotonic())
             return
         with self._lock:
-            # Descartar modificadores "pegados": si Windows dice que ya no
-            # están pulsados, es que se perdió la suelta. Solo QUITAMOS,
-            # nunca añadimos, para no alterar en nada el comportamiento
-            # cuando el enganche funciona bien.
-            reales = _modificadores_realmente_pulsados()
-            if reales is not None:
-                perdidos = self._modifiers - reales
-                if perdidos:
-                    logger.debug(
-                        "Modificadores pegados descartados: {}", sorted(perdidos),
-                    )
-                self._modifiers &= reales
+            self._descartar_modificadores_pegados()
             char = self._tecla_a_char(key)
             # La barra espaciadora llega como Key.space (sin .char). La
             # tratamos como el carácter ' ' para que "hola mundo" sea UN
@@ -870,6 +878,46 @@ class Recorder:
                 timestamp=time.time(),
             ))
 
+    def _descartar_modificadores_pegados(self) -> None:
+        """Quita los modificadores que llevan pegados demasiado tiempo.
+
+        Si se pierde la suelta de una tecla (un aviso de seguridad de
+        Windows, el sistema desenganchando el hook, ciertos Alt+Tab), el
+        modificador se queda pulsado para siempre en nuestro estado y a
+        partir de ahí todo lo tecleado se graba como atajos: "hola" sale
+        como %h %o %l %a y la grabación entera queda inservible.
+
+        Solo se QUITA, nunca se añade, y solo cuando se cumplen las DOS
+        condiciones: que Windows diga que la tecla no está pulsada y que
+        llevemos más de UMBRAL_PEGADO_S creyéndolo. Lo segundo es el
+        seguro explicado arriba: sin él, un escenario donde la consulta al
+        sistema no viera la tecla convertiría todos los atajos en texto,
+        que es un daño mayor que el que se quiere evitar.
+
+        Asume el lock adquirido por el llamador.
+        """
+        reales = _modificadores_realmente_pulsados()
+        if reales is None:
+            return                      # fuera de Windows: no sabemos nada
+        desde = getattr(self, "_modifiers_desde", None)
+        if not desde:
+            return                      # sin cuándo se pulsó, no juzgamos
+        ahora = time.monotonic()
+        pegados = {
+            m for m in (self._modifiers - reales)
+            if ahora - desde.get(m, ahora) > UMBRAL_PEGADO_S
+        }
+        if not pegados:
+            return
+        logger.warning(
+            "Modificadores pegados descartados tras {}s: {} "
+            "(se perdió la suelta de la tecla)",
+            int(UMBRAL_PEGADO_S), sorted(pegados),
+        )
+        self._modifiers -= pegados
+        for m in pegados:
+            desde.pop(m, None)
+
     def _on_release(self, key):
         try:
             self._on_release_impl(key)
@@ -885,6 +933,9 @@ class Recorder:
             return
         with self._lock:
             self._modifiers.discard(mod)
+            desde = getattr(self, "_modifiers_desde", None)
+            if desde:
+                desde.pop(mod, None)
 
     def _flush_text(self) -> None:
         if not self._buf.texto:
