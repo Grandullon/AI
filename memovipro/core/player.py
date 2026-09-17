@@ -576,7 +576,7 @@ class Player:
             if self.dry_run:
                 logger.info("[dry-run] send_keys → {}", paso.valor)
                 return
-            pwkeyboard.send_keys(paso.valor or "")
+            self._send_keys_seguro(paso.valor or "")
             return
         if tipo == StepType.WAIT_UNTIL:
             self._wait_until(paso)
@@ -1353,6 +1353,48 @@ class Player:
             self._resolve_control(tmp)
             return
         time.sleep(float(cond.get("segundos", 1.0)))
+
+    # Teclas que un atajo puede dejar hundidas si el envío falla a medias.
+    _VK_A_SOLTAR = (
+        "VK_LWIN", "VK_RWIN", "VK_CONTROL", "VK_MENU", "VK_SHIFT",
+    )
+
+    def _send_keys_seguro(self, token: str) -> None:
+        """Envía un atajo garantizando que no deja teclas hundidas.
+
+        Un atajo como Win+↑ viaja como "{VK_LWIN down}{UP}{VK_LWIN up}".
+        Si el envío revienta entre medias (la ventana desaparece, la app
+        deja de responder), la tecla se queda pulsada a ojos de Windows: a
+        partir de ahí cada letra se convierte en un atajo del sistema y el
+        menú Inicio roba el foco. En una aplicación clínica eso puede
+        acabar pulsando cualquier cosa, así que soltamos siempre.
+        """
+        if not token:
+            return
+        try:
+            pwkeyboard.send_keys(token)
+        except Exception:
+            if " down}" in token:
+                self._soltar_teclas_colgadas(token)
+            raise
+
+    def _soltar_teclas_colgadas(self, token: str) -> None:
+        """Suelta los modificadores que el token dejó pulsados."""
+        for vk in self._VK_A_SOLTAR:
+            if "{" + vk + " down}" not in token:
+                continue
+            try:
+                if vk in ("VK_LWIN", "VK_RWIN"):
+                    # Tecla neutra con Win aún pulsado: así soltarlo no
+                    # abre el menú Inicio (mismo truco que _adjust_modifiers).
+                    try:
+                        pwkeyboard.send_keys("{VK_F13}")
+                    except Exception:
+                        pass
+                pwkeyboard.send_keys("{" + vk + " up}")
+                logger.warning("Atajo interrumpido: soltada {} colgada", vk)
+            except Exception:
+                pass
 
     # ---- Modificadores (Ctrl/Shift/Alt) mantenidos entre pasos ----
 

@@ -98,6 +98,47 @@ def _button_corto(button) -> str:
     return "left"
 
 
+# Códigos de tecla de Windows para consultar el estado REAL de los
+# modificadores. Se usan los específicos de izquierda/derecha porque el
+# genérico VK_MENU no distingue Alt de AltGr, y en teclado español AltGr
+# tiene que seguir siendo transparente (produce @ # € [ ] { }).
+_VK_LATERALES = {
+    "ctrl": (0xA2, 0xA3),    # VK_LCONTROL, VK_RCONTROL
+    "alt": (0xA4,),          # VK_LMENU  (el derecho es AltGr)
+    "altgr": (0xA5,),        # VK_RMENU
+    "shift": (0xA0, 0xA1),   # VK_LSHIFT, VK_RSHIFT
+    "win": (0x5B, 0x5C),     # VK_LWIN, VK_RWIN
+}
+
+
+def _modificadores_realmente_pulsados() -> set[str] | None:
+    """Qué modificadores están pulsados AHORA MISMO según Windows.
+
+    Devuelve None fuera de Windows o si la consulta falla (entonces el
+    llamador se queda con su propio estado).
+
+    Hace falta porque el enganche de teclado puede perderse una suelta:
+    si aparece un aviso de seguridad de Windows (UAC), si el sistema
+    desengancha el hook por lentitud, o en algunos cambios de ventana con
+    Alt+Tab. Cuando eso pasa, el modificador se queda "pegado" y a partir
+    de ahí TODO lo que se teclee se graba como atajos (%h, %o, %l, %a en
+    vez de "hola"), lo que estropea la grabación entera sin avisar.
+    """
+    try:
+        import ctypes
+        estado = ctypes.windll.user32.GetAsyncKeyState
+    except Exception:
+        return None
+    try:
+        pulsados = set()
+        for nombre, vks in _VK_LATERALES.items():
+            if any(estado(vk) & 0x8000 for vk in vks):
+                pulsados.add(nombre)
+        return pulsados
+    except Exception:
+        return None
+
+
 def _modifier_for(nombre: str) -> str | None:
     """Devuelve 'ctrl' | 'shift' | 'alt' | 'altgr' | 'win' si `nombre` es
     una tecla modificadora.
@@ -611,6 +652,18 @@ class Recorder:
                 self._modifiers.add(mod)
             return
         with self._lock:
+            # Descartar modificadores "pegados": si Windows dice que ya no
+            # están pulsados, es que se perdió la suelta. Solo QUITAMOS,
+            # nunca añadimos, para no alterar en nada el comportamiento
+            # cuando el enganche funciona bien.
+            reales = _modificadores_realmente_pulsados()
+            if reales is not None:
+                perdidos = self._modifiers - reales
+                if perdidos:
+                    logger.debug(
+                        "Modificadores pegados descartados: {}", sorted(perdidos),
+                    )
+                self._modifiers &= reales
             char = self._tecla_a_char(key)
             # La barra espaciadora llega como Key.space (sin .char). La
             # tratamos como el carácter ' ' para que "hola mundo" sea UN
@@ -706,9 +759,15 @@ class Recorder:
         nombre = str(key).replace("Key.", "").replace("'", "")
         mapping = {
             "enter": "{ENTER}", "tab": "{TAB}", "esc": "{ESC}",
-            "space": " ", "backspace": "{BACKSPACE}", "delete": "{DELETE}",
+            "space": "{SPACE}", "backspace": "{BACKSPACE}", "delete": "{DELETE}",
             "up": "{UP}", "down": "{DOWN}", "left": "{LEFT}", "right": "{RIGHT}",
             "home": "{HOME}", "end": "{END}", "page_up": "{PGUP}", "page_down": "{PGDN}",
+            # Teclas que antes se descartaban en silencio: al grabarlas no
+            # pasaba nada y la macro salía incompleta sin decir por qué.
+            "insert": "{INSERT}", "print_screen": "{PRTSC}",
+            "menu": "{VK_APPS}", "apps": "{VK_APPS}",
+            "caps_lock": "{CAPSLOCK}", "num_lock": "{VK_NUMLOCK}",
+            "scroll_lock": "{VK_SCROLL}", "pause": "{BREAK}",
         }
         if nombre in mapping:
             return mapping[nombre]
