@@ -189,6 +189,19 @@ class RecordDialog(QDialog):
             except Exception:
                 pass
 
+        # Apartar este diálogo a una esquina. Sigue VISIBLE (ocultarlo
+        # rompió la captura en su día), pero dejarlo centrado significaba
+        # tener 440x220 píxeles en mitad de la pantalla justo encima de lo
+        # que se quiere pulsar. Se restaura al terminar.
+        self._geom_original = self.geometry()
+        try:
+            scr = self.screen().availableGeometry() if self.screen() else None
+            if scr is not None:
+                self.move(scr.left() + 20,
+                          scr.bottom() - self.height() - 20)
+        except Exception:
+            pass
+
         # Que el recorder ignore los clics sobre nuestras propias ventanas
         # (este diálogo y el panel flotante): sin esto, el clic en
         # "Detener" o un arrastre del panel acaban grabados como pasos.
@@ -237,6 +250,7 @@ class RecordDialog(QDialog):
         if self._recorder is None:
             return
         zonas: list[tuple[int, int, int, int]] = []
+        hwnds: list[int] = []
         for w in (self, self._control):
             if w is None:
                 continue
@@ -248,7 +262,16 @@ class RecordDialog(QDialog):
             rect = self._rect_fisico(w)
             if rect is not None:
                 zonas.append(rect)
+            try:
+                hwnds.append(int(w.winId()))
+            except Exception:
+                pass
         self._recorder.zonas_excluidas = zonas
+        # Los identificadores son lo que el recorder compara de verdad:
+        # así un clic sobre la aplicación que está POR DELANTE de nuestra
+        # ventana se graba, en vez de descartarse por coincidir el
+        # rectángulo de una ventana que está detrás.
+        self._recorder.hwnds_propios = hwnds
 
     def _tick_update(self):
         if self._recorder is None:
@@ -266,7 +289,7 @@ class RecordDialog(QDialog):
                 # no hay forma de enterarse hasta revisar la macro.
                 plural = "s" if descartados > 1 else ""
                 texto += (f"   ⚠ {descartados} clic{plural} sobre esta "
-                          "ventana (no contado" + plural + ")")
+                          f"ventana — apártala si tapa lo que quieres pulsar")
             self.contador.setText(texto)
             if self._control is not None:
                 self._control.set_action(texto)
@@ -318,6 +341,15 @@ class RecordDialog(QDialog):
         # Cambiamos la UI a estado "procesando" inmediatamente.
         self._update_timer.stop()
         self._stop_hotkey_async()
+        # Devolver el diálogo a su sitio: ya no estorba y ahora sí hay que
+        # leerlo (progreso, resumen de lo grabado).
+        geom = getattr(self, "_geom_original", None)
+        if geom is not None:
+            try:
+                self.setGeometry(geom)
+            except Exception:
+                pass
+            self._geom_original = None
         self.estado.setText("⏳ Procesando selectores…")
         self.estado.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50;")
         self.btn_detener.setEnabled(False)

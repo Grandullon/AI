@@ -163,3 +163,59 @@ class _Boton:
     """Botón izquierdo tal como lo imprime pynput."""
     def __str__(self):
         return "Button.left"
+
+
+# ==================== la ventana que hay DE VERDAD debajo ====================
+
+def test_clic_sobre_la_app_que_tapa_nuestra_ventana_se_graba(monkeypatch):
+    """EL CASO GORDO. La ventana de grabación no está siempre encima, así
+    que la aplicación puede estar por delante. Comparando rectángulos,
+    esos clics —que son de la aplicación— se descartaban igual."""
+    r = _recorder_minimo()
+    r.zonas_excluidas = [(0, 0, 1920, 1080)]   # nuestra ventana, detrás
+    r.hwnds_propios = [1111]
+    # Windows dice que bajo el cursor está la ventana de la aplicación
+    monkeypatch.setattr(Recorder, "_ventana_propia_bajo",
+                        lambda self, x, y: False)
+    assert r._punto_excluido(500, 500) is False
+
+
+def test_clic_sobre_nuestra_ventana_se_descarta(monkeypatch):
+    r = _recorder_minimo()
+    r.hwnds_propios = [1111]
+    monkeypatch.setattr(Recorder, "_ventana_propia_bajo",
+                        lambda self, x, y: True)
+    assert r._punto_excluido(10, 10) is True
+
+
+def test_si_no_se_puede_preguntar_se_usan_los_rectangulos(monkeypatch):
+    """Fuera de Windows, o si la consulta falla, el método de siempre."""
+    r = _recorder_minimo()
+    r.zonas_excluidas = [(0, 0, 300, 200)]
+    monkeypatch.setattr(Recorder, "_ventana_propia_bajo",
+                        lambda self, x, y: None)
+    assert r._punto_excluido(150, 100) is True
+    assert r._punto_excluido(800, 600) is False
+
+
+def test_sin_identificadores_no_se_pregunta():
+    """Sin la lista de ventanas propias no hay nada que comparar."""
+    r = _recorder_minimo()
+    r.hwnds_propios = []
+    assert r._ventana_propia_bajo(10, 10) is None
+
+
+def test_el_dialogo_se_aparta_y_se_devuelve():
+    """440x220 en mitad de la pantalla es justo encima de lo que quieres
+    pulsar. Se aparta a una esquina mientras se graba."""
+    src = (ROOT / "ui" / "record_dialog.py").read_text(encoding="utf-8")
+    ini = src.split("def _iniciar_grabacion")[1].split("\n    @staticmethod")[0]
+    assert "_geom_original" in ini and "scr.bottom()" in ini
+    stop = src.split("def _stop(")[1].split("\n    def ")[0]
+    assert "setGeometry(geom)" in stop      # y se devuelve a su sitio
+
+
+def test_el_editor_publica_los_identificadores():
+    src = (ROOT / "ui" / "record_dialog.py").read_text(encoding="utf-8")
+    fn = src.split("def _actualizar_zonas_excluidas")[1].split("\n    def ")[0]
+    assert "hwnds_propios" in fn and "winId()" in fn

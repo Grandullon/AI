@@ -565,6 +565,9 @@ class Recorder:
         # o un arrastre del panel acaban como pasos de la macro. La UI
         # (RecordDialog) actualiza esta lista periódicamente.
         self.zonas_excluidas: list[tuple[int, int, int, int]] = []
+        # Ventanas propias, por identificador. Es lo que se compara de
+        # verdad; `zonas_excluidas` queda solo como respaldo.
+        self.hwnds_propios: list[int] = []
         # Clics que se han tirado por caer sobre el propio MemoviPro.
         self.clics_descartados: int = 0
 
@@ -780,11 +783,49 @@ class Recorder:
         return list(self.eventos_crudos)
 
     def _punto_excluido(self, x: int, y: int) -> bool:
-        """¿El punto cae dentro de una ventana propia de MemoviPro?"""
+        """¿El clic ha caído REALMENTE sobre una ventana de MemoviPro?
+
+        Se le pregunta a Windows qué ventana hay bajo ese punto, en vez de
+        comparar rectángulos. La diferencia importa mucho: la ventana de
+        grabación no está siempre encima, así que la aplicación que se
+        graba puede estar POR DELANTE de ella. Comparando rectángulos,
+        esos clics —que son de la aplicación y hay que grabar— se tiraban
+        igual, y quien grababa veía desaparecer una pulsación de cada tres
+        sin entender por qué.
+
+        Si no se puede preguntar (fuera de Windows, o falla la consulta)
+        se cae al método de siempre, comparar rectángulos.
+        """
+        real = self._ventana_propia_bajo(x, y)
+        if real is not None:
+            return real
         for (left, top, w, h) in list(self.zonas_excluidas):
             if left <= x <= left + w and top <= y <= top + h:
                 return True
         return False
+
+    def _ventana_propia_bajo(self, x: int, y: int) -> bool | None:
+        """¿La ventana que hay bajo (x, y) es nuestra?
+
+        Devuelve None si no se puede saber, para que el llamador use el
+        respaldo. Se compara la ventana de nivel superior, porque el punto
+        cae sobre un botón o una etiqueta y lo que nos interesa es de qué
+        ventana cuelga."""
+        propias = getattr(self, "hwnds_propios", None)
+        if not propias:
+            return None
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            punto = wintypes.POINT(int(x), int(y))
+            hwnd = user32.WindowFromPoint(punto)
+            if not hwnd:
+                return None
+            raiz = user32.GetAncestor(hwnd, 2)      # GA_ROOT
+            return int(raiz or hwnd) in {int(h) for h in propias}
+        except Exception:
+            return None
 
     # ---- Callbacks ----
     # Todos los callbacks van blindados con try/except: pynput DETIENE el
