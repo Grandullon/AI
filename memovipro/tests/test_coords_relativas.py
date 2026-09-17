@@ -20,6 +20,7 @@ def test_construir_macro_guarda_win_rel_en_click_control(monkeypatch):
             Selector(control_type="Button", name="OK"),
             "OK",
             {"title": "INFORMES", "fx": 0.5, "fy": 0.3},
+            None,   # ancla de texto (no aplica en este test)
         )
     monkeypatch.setattr(rec_mod, "_selector_desde_punto", fake)
 
@@ -34,7 +35,7 @@ def test_construir_macro_guarda_win_rel_en_click_control(monkeypatch):
 def test_construir_macro_win_rel_en_click_at_xy(monkeypatch):
     """Si no hay selector pero sí win_rel, se guarda igualmente."""
     def fake(x, y):
-        return (None, f"({x},{y})", {"title": "Excel", "fx": 0.1, "fy": 0.9})
+        return (None, f"({x},{y})", {"title": "Excel", "fx": 0.1, "fy": 0.9}, None)
     monkeypatch.setattr(rec_mod, "_selector_desde_punto", fake)
 
     eventos = [EventoCrudo(tipo="click", x=10, y=20, timestamp=1.0)]

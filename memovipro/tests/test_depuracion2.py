@@ -529,7 +529,10 @@ def test_editor_paso_a_paso_desde_fila():
 def test_editor_toggle_activo():
     src = (ROOT / "ui" / "step_editor.py").read_text(encoding="utf-8")
     assert "def _toggle_activo" in src
-    fn = src.split("def _toggle_activo")[1].split("\n    def ")[0]
+    # La lógica de un solo paso vive en _toggle_activo_uno; _toggle_activo
+    # decide entre el caso suelto y el lote de la selección múltiple.
+    assert "def _toggle_activo_uno" in src
+    fn = src.split("def _toggle_activo_uno")[1].split("\n    def ")[0]
     assert "paso.activo = not paso.activo" in fn
     # Y la tabla marca los desactivados
     assert "setStrikeOut(True)" in src

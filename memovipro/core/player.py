@@ -567,11 +567,7 @@ class Player:
             self._click_control(paso)
             return
         if tipo == StepType.CLICK_AT_XY:
-            extra = paso.extra or {}
-            x, y = int(extra.get("x", 0)), int(extra.get("y", 0))
-            button = str(extra.get("button", "left"))
-            double = bool(extra.get("double", False))
-            self._click_xy(x, y, button=button, double=double)
+            self._click_at_xy(paso)
             return
         if tipo == StepType.TYPE_TEXT:
             self._type_text(paso)
@@ -893,6 +889,7 @@ class Player:
         extra = paso.extra or {}
         fallback = extra.get("fallback_xy")
         win_rel = extra.get("win_rel")
+        ancla = extra.get("texto_ancla")
         img_b64 = extra.get("img_b64")
         button = str(extra.get("button", "left"))
         double = bool(extra.get("double", False))
@@ -901,6 +898,8 @@ class Player:
         # Orden: relativas a ventana → matching por imagen → absolutas.
         if not self.macro.ventana_principal:
             if win_rel and self._click_window_relative(win_rel, button=button, double=double):
+                return
+            if ancla and self._click_por_ancla(ancla, button=button, double=double):
                 return
             if img_b64 and self._click_imagen(img_b64, button=button, double=double):
                 return
@@ -913,6 +912,9 @@ class Player:
             ctrl = self._resolve_control(paso)
         except Exception as exc:
             # Fallback en cascada: relativa a ventana → imagen → absoluta.
+            if ancla and self._click_por_ancla(ancla, button=button, double=double):
+                logger.warning("Selector no resuelto, localizado por ancla de texto: {}", exc)
+                return
             if win_rel and self._click_window_relative(win_rel, button=button, double=double):
                 logger.warning("Selector no resuelto, fallback a coords relativas a ventana: {}", exc)
                 return
@@ -942,6 +944,125 @@ class Player:
             ctrl.double_click_input(button=button)
         else:
             ctrl.click_input(button=button)
+
+    def _click_at_xy(self, paso: Step) -> None:
+        """Clic sin selector, pero NO a ciegas.
+
+        Al grabar ya se guardaban el texto del sitio, la posición relativa
+        a la ventana y una miniatura; hasta ahora este paso los ignoraba y
+        clicaba las coordenadas literales, así que bastaba mover la ventana
+        para que fallara. Ahora prueba en orden: texto → relativa a la
+        ventana → imagen → coordenadas.
+
+        Si la ventana está donde estaba, todos los caminos llevan al mismo
+        punto: el comportamiento no cambia. Solo se desvía cuando localiza
+        el destino en otro sitio, que es justo cuando las coordenadas
+        literales habrían fallado. Con `extra.solo_coordenadas: true` se
+        fuerza el comportamiento literal de siempre.
+        """
+        extra = paso.extra or {}
+        x, y = int(extra.get("x", 0)), int(extra.get("y", 0))
+        button = str(extra.get("button", "left"))
+        double = bool(extra.get("double", False))
+        if not extra.get("solo_coordenadas"):
+            ancla = extra.get("texto_ancla")
+            if ancla and self._click_por_ancla(ancla, button=button, double=double):
+                return
+            win_rel = extra.get("win_rel")
+            if win_rel and self._click_window_relative(win_rel, button=button, double=double):
+                return
+            img_b64 = extra.get("img_b64")
+            if img_b64 and self._click_imagen(img_b64, button=button, double=double):
+                return
+        self._click_xy(x, y, button=button, double=double)
+
+    # ---- Ancla de texto ("clica donde pone X", estilo UiPath) ----
+    def _click_por_ancla(self, ancla: dict, button: str = "left",
+                         double: bool = False) -> bool:
+        """Clica usando el TEXTO capturado al grabar.
+
+        Dos búsquedas con la misma cadena: primero el árbol UIA (exacto e
+        instantáneo) y, si la aplicación no expone nada, OCR de la pantalla.
+        Devuelve True si consiguió clicar."""
+        if not ancla or not ancla.get("texto"):
+            return False
+        if self._click_ancla_uia(ancla, button=button, double=double):
+            return True
+        return self._click_ancla_ocr(ancla, button=button, double=double)
+
+    def _click_ancla_uia(self, ancla: dict, button: str = "left",
+                         double: bool = False) -> bool:
+        """Busca el texto del ancla en el árbol de accesibilidad."""
+        if not _HAS_PYWINAUTO or self.dry_run:
+            if self.dry_run:
+                logger.info('[dry-run] ancla de texto "{}"', ancla.get("texto"))
+            return False
+        buscado = str(ancla.get("texto", ""))
+        from .text_anchor import punto_desde_ancla
+        from .text_read import extraer_texto_de_control, texto_contiene
+        try:
+            raiz = None
+            if self.macro.ventana_principal:
+                win = Desktop(backend="uia").window(
+                    title_re=f".*{re.escape(self.macro.ventana_principal)}.*"
+                )
+                if win.exists(timeout=0.5):
+                    raiz = win
+            if raiz is None:
+                return False
+            for ctrl in raiz.descendants():
+                try:
+                    txt = extraer_texto_de_control(ctrl, incluir_descendientes=False)
+                    if not txt or not texto_contiene(txt, buscado):
+                        continue
+                    r = ctrl.rectangle()
+                    punto = punto_desde_ancla((r.left, r.top, r.right, r.bottom), ancla)
+                except Exception:
+                    continue
+                if punto:
+                    logger.info(
+                        'Ancla de texto "{}" localizada por UIA → clic en {}',
+                        buscado, punto,
+                    )
+                    self._click_xy(punto[0], punto[1], button=button, double=double)
+                    return True
+        except Exception as exc:
+            logger.debug("Ancla por UIA falló: {}", exc)
+        return False
+
+    def _click_ancla_ocr(self, ancla: dict, button: str = "left",
+                         double: bool = False) -> bool:
+        """Último recurso: busca el texto del ancla por OCR en pantalla."""
+        if self.dry_run:
+            return False
+        buscado = str(ancla.get("texto", ""))
+        try:
+            from .ocr import disponible as ocr_disponible, localizar_texto_en_imagen
+            if not ocr_disponible():
+                return False
+            from .screenshot import capturar_pantalla_completa_con_offset
+            full = capturar_pantalla_completa_con_offset(
+                self.screenshots_dir, prefijo="ancla"
+            )
+            if full is None:
+                return False
+            img_path, off_x, off_y = full
+            hit = localizar_texto_en_imagen(str(img_path), buscado, min_confidence=60)
+            if hit is None:
+                return False
+            from .text_anchor import punto_desde_centro
+            punto = punto_desde_centro(off_x + hit.x, off_y + hit.y, ancla)
+            if not punto:
+                return False
+            logger.info(
+                'Ancla de texto "{}" localizada por OCR (conf={}) → clic en {}',
+                buscado, hit.confidence, punto,
+            )
+            self._click_xy(punto[0], punto[1], button=button, double=double)
+            return True
+        except Exception as exc:
+            logger.debug("Ancla por OCR falló: {}", exc)
+        return False
 
     def _click_window_relative(self, win_rel: dict, button: str = "left", double: bool = False) -> bool:
         """Hace clic usando coordenadas relativas a una ventana.

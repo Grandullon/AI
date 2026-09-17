@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
@@ -94,6 +96,16 @@ class StepEditor(QWidget):
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.setAlternatingRowColors(True)
         self.tabla.verticalHeader().setVisible(False)
+        # Selección múltiple por filas: Ctrl+clic para sueltas, Mayús+clic
+        # para un rango, Ctrl+A para todas. Permite borrar o desactivar
+        # varios pasos de una vez.
+        self.tabla.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tabla.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection)
+        borrar = QShortcut(QKeySequence.StandardKey.Delete, self.tabla)
+        borrar.setContext(Qt.ShortcutContext.WidgetShortcut)
+        borrar.activated.connect(self._remove_step)
         layout.addWidget(self.tabla, 1)
 
         botones = QHBoxLayout()
@@ -102,7 +114,7 @@ class StepEditor(QWidget):
             ("Añadir paso", self._add_step, None),
             ("Editar valor", self._edit_value, None),
             ("✓ Verificación", self._edit_verificacion, None),
-            ("Eliminar", self._remove_step, None),
+            ("Eliminar (Supr)", self._remove_step, None),
             ("Subir", lambda: self._move(-1), None),
             ("Bajar", lambda: self._move(1), None),
             ("Inspector", self._launch_inspector, None),
@@ -476,14 +488,40 @@ class StepEditor(QWidget):
                 paso.verificar_timeout_s = float(seg)
         self._refresh_table()
 
+    def _filas_seleccionadas(self) -> list[int]:
+        """Filas seleccionadas, ordenadas y sin repetir.
+
+        Con selección por filas, `selectedIndexes` devuelve una entrada por
+        celda; de ahí el set. Si no hay selección, cae a la fila actual."""
+        filas = {i.row() for i in self.tabla.selectedIndexes()}
+        if not filas:
+            row = self.tabla.currentRow()
+            if row >= 0:
+                filas = {row}
+        return sorted(f for f in filas if 0 <= f < len(self.macro.pasos))
+
     def _remove_step(self):
-        row = self.tabla.currentRow()
-        if row < 0:
+        filas = self._filas_seleccionadas()
+        if not filas:
             return
-        del self.macro.pasos[row]
-        from core.debug_marks import shift_on_remove
-        self._breakpoints = shift_on_remove(self._breakpoints, row)
+        if len(filas) > 1 and QMessageBox.question(
+            self, "Eliminar pasos",
+            f"¿Eliminar {len(filas)} pasos seleccionados?\n\n"
+            f"(del {filas[0] + 1} al {filas[-1] + 1})",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        from core.debug_marks import shift_on_remove_varios
+        # De mayor a menor: así los índices pendientes siguen siendo válidos.
+        for row in reversed(filas):
+            del self.macro.pasos[row]
+        self._breakpoints = shift_on_remove_varios(self._breakpoints, filas)
         self._refresh_table()
+        # Dejar el cursor donde estaba el primer borrado, para seguir
+        # trabajando sin tener que volver a buscar el sitio.
+        if self.macro.pasos:
+            self.tabla.selectRow(min(filas[0], len(self.macro.pasos) - 1))
 
     def _move(self, delta: int):
         row = self.tabla.currentRow()
@@ -610,6 +648,51 @@ class StepEditor(QWidget):
         self.tabla.selectRow(row)
 
     def _toggle_activo(self):
+        """Activa o desactiva los pasos seleccionados (uno o varios)."""
+        filas = self._filas_seleccionadas()
+        if len(filas) > 1:
+            # En lote: el estado del primero manda, para que la selección
+            # entera quede igual en vez de invertirse paso por paso.
+            nuevo = not self.macro.pasos[filas[0]].activo
+            # Un IF_VENTANA arrastra su bloque: avisar una sola vez.
+            if not nuevo and any(
+                self.macro.pasos[f].tipo == StepType.IF_VENTANA
+                and (self.macro.pasos[f].extra or {}).get("saltar_si_no")
+                for f in filas
+            ) and QMessageBox.question(
+                self, "Desactivar condicional",
+                "Entre los pasos seleccionados hay alguna condición "
+                "(IF_VENTANA). Al desactivarla se saltarán TAMBIÉN los "
+                "pasos que protege.\n\n¿Continuar?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            ) != QMessageBox.StandardButton.Yes:
+                return
+            for f in filas:
+                self.macro.pasos[f].activo = nuevo
+            self._refresh_table()
+            self._seleccionar_filas(filas)
+            return
+        return self._toggle_activo_uno()
+
+    def _seleccionar_filas(self, filas: list[int]) -> None:
+        """Re-selecciona varias filas (selectRow a secas borra la anterior)."""
+        from PyQt6.QtCore import QItemSelection, QItemSelectionModel
+        modelo = self.tabla.selectionModel()
+        if modelo is None or not filas:
+            return
+        seleccion = QItemSelection()
+        ncols = self.tabla.columnCount()
+        for f in filas:
+            if 0 <= f < self.tabla.rowCount():
+                seleccion.select(self.tabla.model().index(f, 0),
+                                 self.tabla.model().index(f, ncols - 1))
+        modelo.select(
+            seleccion,
+            QItemSelectionModel.SelectionFlag.ClearAndSelect,
+        )
+
+    def _toggle_activo_uno(self):
         """Activa/desactiva el paso seleccionado (sin borrarlo).
 
         Un paso desactivado se salta al reproducir — útil para probar sin

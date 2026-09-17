@@ -10,6 +10,19 @@ verdad entre el editor y el panel de step-through.
 from __future__ import annotations
 
 
+def shift_on_remove_varios(breakpoints: set[int], filas) -> set[int]:
+    """Desplaza las marcas al borrar VARIAS filas a la vez.
+
+    Se borra de mayor a menor índice para que los índices pendientes sigan
+    siendo válidos mientras la lista encoge; las marcas se desplazan con el
+    mismo orden.
+    """
+    out = set(breakpoints or ())
+    for fila in sorted({int(f) for f in (filas or ())}, reverse=True):
+        out = shift_on_remove(out, fila)
+    return out
+
+
 def breakpoints_alcanzables(breakpoints, start_idx: int, pasos) -> set[int]:
     """Breakpoints que la ejecución puede llegar a disparar de verdad.
 

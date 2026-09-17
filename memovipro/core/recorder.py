@@ -248,20 +248,67 @@ def _ventana_relativa_desde_punto(elem, x: int, y: int) -> dict | None:
         return None
 
 
-def _selector_desde_punto(x: int, y: int) -> tuple[Selector | None, str, dict | None]:
-    """Resuelve (x,y) a un selector simbólico + posición relativa a ventana.
+def _ancla_desde_punto(elem, x: int, y: int) -> dict | None:
+    """Texto que identifica el sitio clicado, estilo UiPath.
 
-    Devuelve (selector_o_None, descripción, win_rel_o_None). win_rel es
-    {"title", "fx", "fy"} para el fallback robusto a coordenadas relativas.
+    Lee el texto del control bajo el cursor por el árbol UIA (no OCR). Si
+    ese control no expone texto —campos de formulario, celdas, iconos—
+    sube hasta 3 niveles buscando el rótulo que lo acompaña, y guarda a qué
+    distancia del texto caía el clic. Así "el campo que hay debajo de DNI"
+    se reproduce aunque el formulario se recoloque.
+
+    Devuelve None si no encuentra un texto fiable; en ese caso el paso
+    funciona exactamente como antes (coordenadas + imagen).
+    """
+    if elem is None:
+        return None
+    from .text_anchor import construir_ancla
+    from .text_read import extraer_texto_de_control
+
+    actual = elem
+    for nivel in range(4):          # el propio control + 3 ancestros
+        try:
+            # En los ancestros no miramos descendientes: devolverían el
+            # texto de media ventana y el ancla sería cualquier cosa.
+            texto = extraer_texto_de_control(
+                actual, incluir_descendientes=(nivel == 0),
+            )
+        except Exception:
+            texto = ""
+        if texto:
+            try:
+                r = actual.rectangle()
+                ancla = construir_ancla(texto, (r.left, r.top, r.right, r.bottom), x, y)
+            except Exception:
+                ancla = None
+            if ancla:
+                return ancla
+        try:
+            actual = actual.parent()
+        except Exception:
+            return None
+        if actual is None:
+            return None
+    return None
+
+
+def _selector_desde_punto(x: int, y: int):
+    """Resuelve (x,y) a un selector simbólico + respaldos robustos.
+
+    Devuelve (selector_o_None, descripción, win_rel_o_None, ancla_o_None):
+      - win_rel: {"title", "fx", "fy"}, coordenadas relativas a la ventana.
+      - ancla:   {"texto", "dx", "dy"}, el TEXTO que hay en ese sitio y a
+        qué distancia cayó el clic (ver core/text_anchor).
     Si falla cualquier paso, los campos correspondientes son None.
     """
     if not _HAS_PYWINAUTO:
-        return None, f"({x},{y})", None
+        return None, f"({x},{y})", None, None
     try:
         elem = Desktop(backend="uia").from_point(x, y)
     except Exception:
-        return None, f"({x},{y})", None
+        return None, f"({x},{y})", None, None
     win_rel = _ventana_relativa_desde_punto(elem, x, y)
+    ancla = _ancla_desde_punto(elem, x, y)
     try:
         name = (elem.window_text() or "").strip()
     except Exception:
@@ -285,9 +332,9 @@ def _selector_desde_punto(x: int, y: int) -> tuple[Selector | None, str, dict | 
         class_name=class_name or None,
     )
     if sel.is_empty():
-        return None, f"({x},{y})", win_rel
+        return None, f"({x},{y})", win_rel, ancla
     desc = name or ctrl_type or class_name or f"({x},{y})"
-    return sel, desc, win_rel
+    return sel, desc, win_rel, ancla
 
 
 class Recorder:
@@ -707,8 +754,9 @@ class Recorder:
                 sel = None
                 desc = evt.descripcion
                 win_rel = None
+                ancla = None
                 if resolver_selectores:
-                    sel, desc, win_rel = _selector_desde_punto(evt.x, evt.y)
+                    sel, desc, win_rel, ancla = _selector_desde_punto(evt.x, evt.y)
                 # Prefijos para la descripción del paso
                 mods_label = evt.modifiers.upper() + " " if evt.modifiers else ""
                 accion = "Doble click" if evt.double else "Click"
@@ -724,6 +772,8 @@ class Recorder:
                     extra: dict = {"fallback_xy": [evt.x, evt.y]}
                     if win_rel:
                         extra["win_rel"] = win_rel
+                    if ancla:
+                        extra["texto_ancla"] = ancla
                     if img_b64:
                         extra["img_b64"] = img_b64
                     if evt.button != "left":
@@ -743,6 +793,8 @@ class Recorder:
                     extra = {"x": evt.x, "y": evt.y}
                     if win_rel:
                         extra["win_rel"] = win_rel
+                    if ancla:
+                        extra["texto_ancla"] = ancla
                     if img_b64:
                         extra["img_b64"] = img_b64
                     if evt.button != "left":
