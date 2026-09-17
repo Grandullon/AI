@@ -1048,7 +1048,7 @@ class Player:
         caigan fuera de la ventana.
         """
         from .text_anchor import puntuar_candidato, punto_desde_ancla, punto_dentro
-        from .text_read import extraer_texto_de_control
+        from .text_read import texto_de_rotulo
         buscado = str(ancla.get("texto", ""))
         mejor = None
         mejor_punto = None
@@ -1057,7 +1057,10 @@ class Player:
                 try:
                     if not ctrl.is_visible():
                         continue
-                    txt = extraer_texto_de_control(ctrl, incluir_descendientes=False)
+                    # Solo el rótulo, igual que al grabar: si comparásemos
+                    # con el contenido, el ancla "Alta" casaría con un
+                    # campo en el que alguien hubiera escrito "Alta".
+                    txt = texto_de_rotulo(ctrl)
                     if not txt:
                         continue
                     r = ctrl.rectangle()

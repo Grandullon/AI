@@ -306,6 +306,11 @@ def _ancla_desde_punto(elem, x: int, y: int) -> dict | None:
     propio: un botón, un rótulo, una opción de menú. Se lee del árbol UIA
     (no OCR), así que es instantáneo y exacto.
 
+    Se lee SOLO el rótulo (la propiedad Name), nunca el contenido: el
+    contenido de un campo es un dato del paciente — cambia en cada
+    ejecución, no identifica nada, y no debe acabar escrito en el fichero
+    de la macro.
+
     NO se sube a los elementos que lo contienen ni se concatenan los
     rótulos de dentro. Se intentó, y era peligroso: el texto acababa
     siendo el de un panel entero o el título del diálogo, y al reproducir
@@ -320,11 +325,8 @@ def _ancla_desde_punto(elem, x: int, y: int) -> dict | None:
     if elem is None:
         return None
     from .text_anchor import construir_ancla
-    from .text_read import extraer_texto_de_control
-    try:
-        texto = extraer_texto_de_control(elem, incluir_descendientes=False)
-    except Exception:
-        return None
+    from .text_read import texto_de_rotulo
+    texto = texto_de_rotulo(elem)
     if not texto:
         return None
     try:

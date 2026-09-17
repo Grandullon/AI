@@ -433,3 +433,58 @@ def test_mensaje_de_borrado_no_finge_un_rango():
     assert "3, 7, 40" in suelta and "al 40" not in suelta
     muchos = f(list(range(0, 30, 2)))              # 15 sueltos
     assert "y 5 más" in muchos
+
+
+# ==================== rótulo sí, contenido no ====================
+
+class _CtrlFalso:
+    """Control con rótulo (Name) y contenido (Value) distintos."""
+    def __init__(self, rotulo="", contenido=""):
+        self._rotulo, self._contenido = rotulo, contenido
+
+    def window_text(self):
+        return self._rotulo
+
+    def get_value(self):
+        return self._contenido
+
+    def legacy_properties(self):
+        return {"Value": self._contenido}
+
+    def descendants(self, control_type=None):
+        return []
+
+
+def test_el_ancla_usa_el_rotulo_no_el_contenido():
+    """Un campo con el nombre de un paciente NO debe acabar en el YAML."""
+    from core.text_read import texto_de_rotulo, extraer_texto_de_control
+    campo = _CtrlFalso(rotulo="Primer apellido", contenido="García Pérez")
+    # El ancla lee solo el rótulo…
+    assert texto_de_rotulo(campo) == "Primer apellido"
+    # …mientras que GET_TEXT sigue leyendo el contenido, que es su trabajo.
+    assert "García Pérez" in extraer_texto_de_control(campo)
+
+
+def test_campo_sin_rotulo_no_genera_ancla():
+    """Si la aplicación no publica rótulo, mejor ningún ancla que un
+    ancla hecha con el dato que hubiera escrito dentro."""
+    from core.text_read import texto_de_rotulo
+    assert texto_de_rotulo(_CtrlFalso(rotulo="", contenido="12345678A")) == ""
+
+
+def test_boton_con_texto_si_genera_ancla():
+    from core.text_read import texto_de_rotulo
+    from core.text_anchor import construir_ancla
+    boton = _CtrlFalso(rotulo="Aceptar")
+    texto = texto_de_rotulo(boton)
+    assert construir_ancla(texto, (100, 50, 200, 80), 150, 65) == {
+        "texto": "Aceptar", "dx": 0, "dy": 0,
+    }
+
+
+def test_el_recorder_lee_solo_el_rotulo():
+    """Blindaje: que nadie vuelva a meter el contenido en el ancla."""
+    src = (ROOT / "core" / "recorder.py").read_text(encoding="utf-8")
+    fn = src.split("def _ancla_desde_punto")[1].split("\ndef ")[0]
+    assert "texto_de_rotulo" in fn
+    assert "extraer_texto_de_control" not in fn

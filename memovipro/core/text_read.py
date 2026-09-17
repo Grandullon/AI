@@ -77,6 +77,25 @@ def extraer_texto_de_control(ctrl, incluir_descendientes: bool = True) -> str:
     return normalizar(" ".join(out))
 
 
+def texto_de_rotulo(ctrl) -> str:
+    """Lee SOLO el rótulo del control (propiedad Name), nunca su contenido.
+
+    Es lo que se usa como ancla de texto. La diferencia importa mucho:
+      - El RÓTULO de un campo ("Primer apellido") es estable: identifica
+        el sitio y sirve para encontrarlo la próxima vez.
+      - El CONTENIDO ("García") es un dato: cambia con cada paciente, así
+        que como ancla no vale para nada... y además quedaría escrito en
+        el fichero de la macro, que no es sitio para datos personales.
+
+    Para leer el contenido de un control está `extraer_texto_de_control`,
+    que es lo que usa el paso GET_TEXT (ahí sí es lo que se busca).
+    """
+    try:
+        return normalizar(ctrl.window_text() or "")
+    except Exception:
+        return ""
+
+
 def texto_contiene(texto: str, buscado: str) -> bool:
     """¿`texto` contiene `buscado`? Comparación laxa: sin distinguir
     mayúsculas/minúsculas ni acentos (reutiliza la normalización del OCR
