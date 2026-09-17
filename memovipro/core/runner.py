@@ -40,6 +40,7 @@ class MacroRunner:
         dry_run: bool = False,
         reintentar_ko_al_final: bool = True,
         smtp_config: SmtpConfig | None = None,
+        max_ko_seguidos: int | None = None,
     ):
         self.macro = macro
         self.excel_dnis = Path(excel_dnis)
@@ -67,6 +68,12 @@ class MacroRunner:
         self.smtp_config = smtp_config
         self._abort = threading.Event()
         self._player: Player | None = None
+        # Corte automático si la tanda se descarrila (ver core/cortacircuitos).
+        from .cortacircuitos import MAX_KO_SEGUIDOS
+        self.max_ko_seguidos = (
+            MAX_KO_SEGUIDOS if max_ko_seguidos is None else int(max_ko_seguidos)
+        )
+        self.cortado_por = ""
 
     def abort(self) -> None:
         self._abort.set()
@@ -78,8 +85,10 @@ class MacroRunner:
         cola: list[dict],
         etiqueta_pasada: str,
     ) -> tuple[list[str], list[tuple[str, str]]]:
+        from .cortacircuitos import Cortacircuitos
         ok_list: list[str] = []
         ko_list: list[tuple[str, str]] = []
+        corte = Cortacircuitos(self.max_ko_seguidos)
         logger.info("Pasada '{}' · {} DNIs", etiqueta_pasada, len(cola))
         for fila in cola:
             if self._abort.is_set():
@@ -119,9 +128,30 @@ class MacroRunner:
                 logger.warning("[{}] KO · DNI={} · {}", etiqueta_pasada, dni, motivo)
             if self.on_dni_done:
                 self.on_dni_done(dni, exito)
+
+            corte.registrar(exito)
+            if corte.debe_parar():
+                # Marcar los que quedan como pendientes NO hace falta: el
+                # checkpoint solo apunta los ya procesados, así que
+                # reanudar con "solo pendientes" retoma justo aquí.
+                self.cortado_por = corte.motivo
+                logger.error(
+                    "[{}] CORTE AUTOMÁTICO tras {} fallos seguidos · quedaban {} casos",
+                    etiqueta_pasada, corte.seguidos,
+                    len(cola) - len(ok_list) - len(ko_list),
+                )
+                self._abort.set()
+                break
         return ok_list, ko_list
 
     def run(self, solo_pendientes: bool = True) -> RunSummary:
+        # Las capturas de incidencias llevan datos de pacientes en pantalla:
+        # se conservan mientras sirven para revisar y luego se borran.
+        try:
+            from .retencion import limpiar_capturas
+            limpiar_capturas(self.screenshots_dir)
+        except Exception as exc:
+            logger.debug("Limpieza de capturas omitida: {}", exc)
         todos = cargar_dnis(self.excel_dnis)
         cola = self.checkpoint.pendientes(todos) if solo_pendientes else todos
         total = len(cola)

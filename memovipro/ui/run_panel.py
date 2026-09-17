@@ -226,6 +226,13 @@ class RunPanel(QWidget):
 
     def _on_finished(self, summary: RunSummary):
         self._append_log(f"\n=== FIN ===\nOK: {summary.ok}   KO: {summary.ko}   Total: {summary.total}\nLog: {summary.log_path}")
+        # Si la tanda se cortó sola hay que decirlo BIEN VISIBLE: un
+        # resumen con muchos KO se puede confundir con "esos casos no
+        # estaban", cuando en realidad la macro se había perdido.
+        motivo = getattr(self._runner, "cortado_por", "")
+        if motivo:
+            self._append_log(f"\n🛑 TANDA DETENIDA\n{motivo}")
+            QMessageBox.warning(self, "Tanda detenida automáticamente", motivo)
         self.run_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self._restore_main_window()
