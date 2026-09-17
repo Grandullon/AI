@@ -80,6 +80,10 @@ class EventoCrudo:
     descripcion: str = ""
     timestamp: float = 0.0
     img_png: bytes | None = None  # thumbnail PNG alrededor del clic (matching)
+    # Selector/ancla resueltos EN EL MOMENTO del clic por el hilo
+    # resolutor. Si está a None, `construir_macro` los resuelve al final
+    # (peor: la pantalla ya ha cambiado).
+    resuelto: tuple | None = None
 
 
 # Distancia mínima en píxeles para considerar que un press+release es un drag,
@@ -327,13 +331,69 @@ def _ancla_desde_punto(elem, x: int, y: int) -> dict | None:
     from .text_anchor import construir_ancla
     from .text_read import texto_de_rotulo
     texto = texto_de_rotulo(elem)
-    if not texto:
-        return None
+    if texto:
+        try:
+            r = elem.rectangle()
+            ancla = construir_ancla(
+                texto, (r.left, r.top, r.right, r.bottom), x, y,
+            )
+        except Exception:
+            ancla = None
+        if ancla:
+            ancla["modo"] = "encima"
+            return ancla
+    # El control no tiene rótulo propio (un campo vacío, una celda): el
+    # sitio lo identifica el rótulo de al lado.
+    return _ancla_vecina(elem, x, y)
+
+
+def _ancla_vecina(elem, x: int, y: int) -> dict | None:
+    """Rótulo de al lado que identifica el sitio (el "anchor" de UiPath).
+
+    Para un campo vacío, lo que identifica dónde hay que escribir no es el
+    campo (no tiene texto) sino el rótulo que tiene al lado: "Primer
+    apellido". Buscamos entre los hermanos el control con rótulo propio
+    MÁS CERCANO al clic, y guardamos el desplazamiento respecto a ÉL.
+
+    La clave está en que se guarda el rectángulo del propio rótulo, no el
+    del contenedor: al reproducir se busca un control con ese mismo
+    rótulo, así que los dos lados miden desde el mismo sitio. Hacerlo con
+    el contenedor fue el error que desviaba los clics cientos de píxeles.
+    """
+    from .text_anchor import construir_ancla, rect_utilizable
+    from .text_read import texto_de_rotulo
     try:
-        r = elem.rectangle()
-        return construir_ancla(texto, (r.left, r.top, r.right, r.bottom), x, y)
+        padre = elem.parent()
     except Exception:
         return None
+    if padre is None:
+        return None
+    try:
+        hermanos = padre.children()
+    except Exception:
+        return None
+
+    mejor = None
+    mejor_dist = None
+    for h in hermanos[:60]:          # tope: no recorrer formularios enormes
+        try:
+            texto = texto_de_rotulo(h)
+            if not texto:
+                continue
+            r = h.rectangle()
+            rect = (r.left, r.top, r.right, r.bottom)
+            if not rect_utilizable(rect):
+                continue
+            cx, cy = (r.left + r.right) // 2, (r.top + r.bottom) // 2
+            dist = abs(x - cx) + abs(y - cy)     # distancia de manzana
+            if mejor_dist is None or dist < mejor_dist:
+                ancla = construir_ancla(texto, rect, x, y)
+                if ancla:
+                    ancla["modo"] = "vecino"
+                    mejor, mejor_dist = ancla, dist
+        except Exception:
+            continue
+    return mejor
 
 
 def _selector_desde_punto(x: int, y: int):
@@ -422,6 +482,7 @@ class Recorder:
         self._buf = _BufferTexto()
         self._modifiers = set()
         self._press_pendiente = None
+        self._arrancar_resolutor()
         self._mouse_listener = mouse.Listener(
             on_click=self._on_click,
             on_scroll=self._on_scroll,
@@ -430,6 +491,84 @@ class Recorder:
         self._mouse_listener.start()
         self._kb_listener.start()
         logger.info("Recorder.start · listeners pynput arrancados")
+
+    # ---- Resolución EN VIVO del elemento clicado ----
+    #
+    # Hasta ahora el selector y el ancla se calculaban al terminar la
+    # grabación, preguntando "¿qué hay en estas coordenadas?" sobre la
+    # pantalla de ESE momento. Si el formulario había cambiado —lo normal
+    # en una grabación larga— se guardaba el elemento equivocado. Un
+    # selector caduco al menos falla y cae a coordenadas; un ancla caduca
+    # es peor: clica muy convencida en otro sitio.
+    #
+    # Ahora cada clic se encola y un hilo aparte lo resuelve en cuanto
+    # puede, con la pantalla todavía como estaba. El hilo va aparte a
+    # propósito: consultar el árbol UIA tarda décimas de segundo y hacerlo
+    # dentro del enganche del ratón frenaría la grabación entera.
+
+    # Tiempo máximo de espera al parar para que el resolutor termine la
+    # cola. Lo que no dé tiempo se resuelve al construir la macro.
+    RESOLUTOR_TIMEOUT_S = 20.0
+
+    def _arrancar_resolutor(self) -> None:
+        import queue
+        self._cola_resolver = queue.Queue()
+        self._resolutor = threading.Thread(
+            target=self._bucle_resolutor, name="recorder-resolutor", daemon=True,
+        )
+        self._resolutor.start()
+
+    def _bucle_resolutor(self) -> None:
+        cola = self._cola_resolver
+        while True:
+            try:
+                tarea = cola.get()
+            except Exception:
+                return
+            if tarea is None:       # señal de parada
+                return
+            evt, x, y = tarea
+            try:
+                evt.resuelto = _selector_desde_punto(x, y)
+            except Exception as exc:
+                logger.debug("Resolución en vivo falló en ({},{}): {}", x, y, exc)
+            finally:
+                try:
+                    cola.task_done()
+                except Exception:
+                    pass
+
+    def _encolar_resolucion(self, evt: EventoCrudo) -> None:
+        cola = getattr(self, "_cola_resolver", None)
+        if cola is None:
+            return
+        try:
+            cola.put((evt, evt.x, evt.y))
+        except Exception:
+            pass
+
+    def _parar_resolutor(self) -> None:
+        """Deja terminar lo que queda en la cola y para el hilo."""
+        cola = getattr(self, "_cola_resolver", None)
+        hilo = getattr(self, "_resolutor", None)
+        if cola is None or hilo is None:
+            return
+        try:
+            cola.put(None)
+            hilo.join(timeout=self.RESOLUTOR_TIMEOUT_S)
+        except Exception:
+            pass
+        pendientes = sum(
+            1 for e in self.eventos_crudos
+            if e.tipo == "click" and e.resuelto is None
+        )
+        if pendientes:
+            logger.info(
+                "{} clic(s) sin resolver en vivo: se resolverán al construir la macro",
+                pendientes,
+            )
+        self._cola_resolver = None
+        self._resolutor = None
 
     def stop(self) -> list[EventoCrudo]:
         """Detiene los listeners y devuelve los eventos crudos.
@@ -455,6 +594,7 @@ class Recorder:
                 logger.debug("Fallo al esperar (join) a un listener de captura: {}", exc)
         self._mouse_listener = None
         self._kb_listener = None
+        self._parar_resolutor()
         with self._lock:
             self._flush_text()
         logger.info(
@@ -565,7 +705,7 @@ class Recorder:
                 ultimo.double = True
                 ultimo.descripcion = self._descripcion_click(ultimo.x, ultimo.y, btn, mods, double=True)
                 return
-        self.eventos_crudos.append(EventoCrudo(
+        evt = EventoCrudo(
             tipo="click",
             x=x, y=y,
             button=btn,
@@ -573,7 +713,11 @@ class Recorder:
             descripcion=self._descripcion_click(x, y, btn, mods, double=False),
             timestamp=ahora,
             img_png=pendiente.get("img_png"),
-        ))
+        )
+        self.eventos_crudos.append(evt)
+        # Resolver YA, con la pantalla como está ahora (en otro hilo, para
+        # no frenar la grabación).
+        self._encolar_resolucion(evt)
 
     def _emitir_drag(self, pendiente: dict, x_release: int, y_release: int) -> None:
         """Emite un drag de (press.x, press.y) a (release.x, release.y)."""
@@ -818,7 +962,12 @@ class Recorder:
                 win_rel = None
                 ancla = None
                 if resolver_selectores:
-                    sel, desc, win_rel, ancla = _selector_desde_punto(evt.x, evt.y)
+                    # Preferimos SIEMPRE lo resuelto en vivo: se calculó
+                    # con la pantalla tal y como estaba al clicar.
+                    if evt.resuelto is not None:
+                        sel, desc, win_rel, ancla = evt.resuelto
+                    else:
+                        sel, desc, win_rel, ancla = _selector_desde_punto(evt.x, evt.y)
                 # Prefijos para la descripción del paso
                 mods_label = evt.modifiers.upper() + " " if evt.modifiers else ""
                 accion = "Doble click" if evt.double else "Click"

@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .about_panel import AboutPanel
 from .dashboard_panel import DashboardPanel
 from .incidents_view import IncidentsView
 from .pipeline_panel import PipelinePanel
@@ -76,6 +77,15 @@ QMessageBox QLabel { color: #2c3e50; }
 """
 
 
+def _version() -> str:
+    """Versión del paquete, si está disponible."""
+    try:
+        from core import __version__
+        return str(__version__)
+    except Exception:
+        return ""
+
+
 class MainWindow(QMainWindow):
     def __init__(self, data_dir: Path, macros_dir: Path, pipelines_dir: Path | None = None):
         super().__init__()
@@ -84,6 +94,7 @@ class MainWindow(QMainWindow):
         self.pipelines_dir = pipelines_dir or (macros_dir.parent / "pipelines")
         self.pipelines_dir.mkdir(parents=True, exist_ok=True)
         self.setWindowTitle("MemoviPro — Automatización IT")
+        # La autoría vive en la pestaña "ℹ" (ui/about_panel.py).
         self.setGeometry(100, 100, 1100, 700)
         self.setStyleSheet(APP_STYLE)
 
@@ -112,6 +123,7 @@ class MainWindow(QMainWindow):
         )
         self.secrets_panel = SecretsPanel(data_dir=self.data_dir)
         self.dashboard_panel = DashboardPanel(data_dir=self.data_dir)
+        self.about_panel = AboutPanel(version=_version())
 
         self.tabs.addTab(self.step_editor, "Macros")
         self.tabs.addTab(self.replay_panel, "Reproducir")
@@ -121,6 +133,9 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.secrets_panel, "Secretos")
         self.tabs.addTab(self.incidents_view, "Incidencias")
         self.tabs.addTab(self.dashboard_panel, "Dashboard")
+        self.tabs.addTab(self.about_panel, "ℹ")
+        self.tabs.setTabToolTip(
+            self.tabs.count() - 1, "Acerca de MemoviPro")
         layout.addWidget(self.tabs)
 
         self.setStatusBar(QStatusBar())

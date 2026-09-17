@@ -43,13 +43,21 @@ def test_ancla_guarda_el_desplazamiento_dentro_del_control():
     assert a["dy"] == -5
 
 
-def test_ancla_rechaza_clic_fuera_del_control():
-    """El campo que hay LEJOS del rótulo ya no se ancla.
+def test_ancla_admite_el_campo_de_al_lado_del_rotulo():
+    """"El campo que hay a la derecha de «DNI»": es seguro porque el
+    rectángulo guardado es el del PROPIO rótulo, y al reproducir se busca
+    un control con ese mismo rótulo. Los dos lados miden desde el mismo
+    sitio; medir desde el contenedor era lo que desviaba los clics."""
+    a = construir_ancla("DNI", (100, 50, 140, 70), 250, 60)
+    assert a == {"texto": "DNI", "dx": 130, "dy": 0}
+    # Y ese ancla NO se busca por OCR: ahí el punto de partida sería el
+    # centro de la palabra pintada, no el del control.
+    from core.text_anchor import ancla_admite_ocr
+    assert not ancla_admite_ocr(a)
 
-    Se intentó y era peligroso: al reproducir, el desplazamiento se
-    aplicaba desde el centro de otro elemento y el clic se iba a cientos
-    de píxeles, muy convencido."""
-    assert construir_ancla("DNI", (100, 50, 140, 70), 250, 60) is None
+
+def test_ancla_rechaza_clic_absurdamente_lejos():
+    assert construir_ancla("DNI", (100, 50, 140, 70), 1500, 60) is None
 
 
 def test_ancla_rechaza_controles_enormes():
@@ -488,3 +496,107 @@ def test_el_recorder_lee_solo_el_rotulo():
     fn = src.split("def _ancla_desde_punto")[1].split("\ndef ")[0]
     assert "texto_de_rotulo" in fn
     assert "extraer_texto_de_control" not in fn
+
+
+# ==================== resolución en vivo (como UiPath) ====================
+
+def test_el_clic_se_resuelve_mientras_grabas(monkeypatch):
+    """Antes el elemento se identificaba al PARAR la grabación, sobre una
+    pantalla que ya había cambiado: se guardaba el control equivocado."""
+    import threading as _th
+    import core.recorder as rec
+    from core.recorder import Recorder, EventoCrudo
+
+    pantalla = {"ahora": "PANTALLA-1"}
+    monkeypatch.setattr(
+        rec, "_selector_desde_punto",
+        lambda x, y: (None, pantalla["ahora"], None, None),
+    )
+    r = Recorder.__new__(Recorder)
+    r._lock = _th.Lock()
+    r.eventos_crudos = []
+    r._arrancar_resolutor()
+
+    evt = EventoCrudo(tipo="click", x=10, y=20)
+    r.eventos_crudos.append(evt)
+    r._encolar_resolucion(evt)
+
+    # La pantalla cambia DESPUÉS del clic (el usuario sigue trabajando)
+    r._parar_resolutor()
+    pantalla["ahora"] = "PANTALLA-2"
+
+    assert evt.resuelto is not None
+    assert evt.resuelto[1] == "PANTALLA-1"      # lo que había al clicar
+
+
+def test_construir_macro_prefiere_lo_resuelto_en_vivo(monkeypatch):
+    import core.recorder as rec
+    from core.recorder import Recorder, EventoCrudo
+    from core.step_model import Selector
+
+    llamadas = []
+    monkeypatch.setattr(
+        rec, "_selector_desde_punto",
+        lambda x, y: llamadas.append((x, y)) or (None, "TARDE", None, None),
+    )
+    evt = EventoCrudo(tipo="click", x=5, y=6, timestamp=1.0)
+    evt.resuelto = (Selector(control_type="Button", name="Aceptar"),
+                    "Aceptar", None, {"texto": "Aceptar", "dx": 0, "dy": 0})
+    macro = Recorder.construir_macro([evt], resolver_selectores=True)
+    assert llamadas == []                       # no se vuelve a preguntar
+    paso = macro.pasos[0]
+    assert paso.selector.name == "Aceptar"
+    assert paso.extra["texto_ancla"]["texto"] == "Aceptar"
+
+
+def test_si_no_dio_tiempo_se_resuelve_al_final(monkeypatch):
+    """Red de seguridad: un clic que el resolutor no alcanzó sigue
+    resolviéndose al construir la macro, como antes."""
+    import core.recorder as rec
+    from core.recorder import Recorder, EventoCrudo
+
+    llamadas = []
+    monkeypatch.setattr(
+        rec, "_selector_desde_punto",
+        lambda x, y: llamadas.append((x, y)) or (None, f"({x},{y})", None, None),
+    )
+    evt = EventoCrudo(tipo="click", x=5, y=6, timestamp=1.0)   # resuelto=None
+    Recorder.construir_macro([evt], resolver_selectores=True)
+    assert llamadas == [(5, 6)]
+
+
+def test_el_resolutor_no_frena_la_grabacion(monkeypatch):
+    """La resolución va en otro hilo: encolar debe volver al instante
+    aunque consultar el árbol tarde."""
+    import threading as _th
+    import time as _t
+    import core.recorder as rec
+    from core.recorder import Recorder, EventoCrudo
+
+    def lento(x, y):
+        _t.sleep(0.4)
+        return (None, "ok", None, None)
+
+    monkeypatch.setattr(rec, "_selector_desde_punto", lento)
+    r = Recorder.__new__(Recorder)
+    r._lock = _th.Lock()
+    r.eventos_crudos = []
+    r._arrancar_resolutor()
+    evt = EventoCrudo(tipo="click", x=1, y=2)
+    r.eventos_crudos.append(evt)
+
+    t0 = _t.time()
+    r._encolar_resolucion(evt)
+    encolar_tardo = _t.time() - t0
+    assert encolar_tardo < 0.05          # instantáneo
+    r._parar_resolutor()
+    assert evt.resuelto is not None      # y al parar sí se esperó
+
+
+# ==================== pestaña de autoría ====================
+
+def test_pestana_acerca_de_con_el_autor():
+    src = (ROOT / "ui" / "about_panel.py").read_text(encoding="utf-8")
+    assert "Francisco J. Vidal Gázquez" in src
+    mw = (ROOT / "ui" / "main_window.py").read_text(encoding="utf-8")
+    assert "AboutPanel" in mw and "addTab(self.about_panel" in mw

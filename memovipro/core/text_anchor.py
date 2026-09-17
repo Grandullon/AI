@@ -25,10 +25,12 @@ MAX_LEN = 60
 # distinto. Solo anclamos en cosas del tamaño de un botón o un rótulo.
 MAX_W = 600
 MAX_H = 200
-# Distancia máxima entre el centro del texto y el clic. El ancla solo se
-# graba cuando clicaste SOBRE el propio texto, así que el desplazamiento
-# es, como mucho, media anchura del control.
-MAX_OFFSET = 60
+# Distancia máxima entre el centro del rótulo y el clic. Admite el caso
+# "el campo que hay a la derecha de «Primer apellido»": es seguro porque
+# el rectángulo guardado es el del PROPIO rótulo, y al reproducir se
+# busca un control con ese mismo rótulo — los dos lados miden desde el
+# mismo sitio. Medir desde el contenedor fue lo que desviaba los clics.
+MAX_OFFSET = 400
 
 
 def normalizar(texto: str) -> str:
@@ -103,7 +105,7 @@ def punto_desde_centro(cx: int, cy: int, ancla: dict) -> tuple[int, int] | None:
 # del texto, y divergen mucho cuando el control es bastante mayor que su
 # rótulo (un grupo con el título arriba a la izquierda). Por eso el camino
 # OCR solo se usa para anclas "clicaste encima".
-MAX_OFFSET_OCR = MAX_OFFSET
+MAX_OFFSET_OCR = 60
 
 
 def rect_utilizable(rect) -> bool:
