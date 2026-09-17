@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.config_ejecucion import opciones_ejecucion
 from core.step_model import Macro, SalidaConfig, Selector, Step, StepType
 from core.textos import confirmar_borrado
 
@@ -1023,6 +1024,7 @@ class StepEditor(QWidget):
             data_dir=data_dir,
             start_idx=start_idx,
             stop_after_idx=stop_after_idx,
+            **opciones_ejecucion(data_dir.parent / "config.json"),
         )
         self._range_thread = _RangeRunThread(self._range_runner)
         self._range_thread.finished_summary.connect(self._on_range_finished)

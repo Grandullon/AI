@@ -156,22 +156,29 @@ def test_paso_antiguo_sin_proceso_no_se_comprueba(monkeypatch):
 
 def test_ventana_equivocada_impide_el_clic(monkeypatch):
     """El escenario que se quiere evitar: la sesión caducó y delante hay
-    otra cosa. Antes se clicaba igual."""
+    otra cosa que no se quita. Antes se clicaba igual."""
     from core.player import Player
     from core.step_model import Macro
+    from core.ventana_intrusa import Politica
 
     p = Player.__new__(Player)
     p.dry_run = False
     p.macro = Macro(nombre="m", pasos=[], ventana_principal="GERHONTE")
+    p.politica_intrusas = Politica(esperar_s=0.0, intervalo_s=0.0)
     monkeypatch.setattr("core.proceso.proceso_en_primer_plano", lambda: "chrome.exe")
-    monkeypatch.setattr("core.window_utils.asegurar_ventana", lambda *a, **k: None)
+    monkeypatch.setattr(Player, "_ventana_frontal",
+                        staticmethod(lambda: ("chrome.exe", "Gmail - Chrome")))
+    monkeypatch.setattr(Player, "_activar_ventana", staticmethod(lambda t: None))
     paso = Step(tipo=StepType.CLICK_AT_XY, extra={
         "x": 1, "y": 2, "win_rel": {"title": "GERHONTE", "proceso": "gerhonte.exe"}})
     try:
         Player._comprobar_foco_esperado(p, paso)
         assert False, "debería impedir el paso"
     except RuntimeError as exc:
-        assert "gerhonte.exe" in str(exc) and "chrome.exe" in str(exc)
+        # El mensaje tiene que decir QUÉ estorbaba, para poder apuntarlo
+        assert "Gmail - Chrome" in str(exc)
+        assert "gerhonte.exe" in str(exc)
+        assert "cerrar_titulos" in str(exc)
 
 
 def test_si_el_programa_coincide_sigue_adelante(monkeypatch):
@@ -187,27 +194,27 @@ def test_si_el_programa_coincide_sigue_adelante(monkeypatch):
     Player._comprobar_foco_esperado(p, paso)      # no lanza
 
 
-def test_primero_intenta_traer_la_ventana_al_frente(monkeypatch):
-    """El caso normal no es que la sesión haya caducado, sino que otra
-    ventana se ha puesto encima: eso se arregla activando."""
+def test_una_ventana_pasajera_no_tumba_el_paso(monkeypatch):
+    """Lo más habitual: un aviso aparece y se va solo en unos segundos.
+    Antes eso tumbaba un paso que habría funcionado sin hacer nada."""
     from core.player import Player
     from core.step_model import Macro
+    from core.ventana_intrusa import Politica
 
     p = Player.__new__(Player)
     p.dry_run = False
     p.macro = Macro(nombre="m", pasos=[], ventana_principal="GERHONTE")
-    estado = {"activada": False}
-    def _activar(titulo, *a, **k):
-        estado["activada"] = True
-    monkeypatch.setattr("core.window_utils.asegurar_ventana", _activar)
+    p.politica_intrusas = Politica(esperar_s=5.0, intervalo_s=0.0)
+    vistas = ["chrome.exe", "chrome.exe", "gerhonte.exe"]
+    monkeypatch.setattr("core.proceso.proceso_en_primer_plano", lambda: "chrome.exe")
     monkeypatch.setattr(
-        "core.proceso.proceso_en_primer_plano",
-        lambda: "gerhonte.exe" if estado["activada"] else "chrome.exe",
+        Player, "_ventana_frontal",
+        staticmethod(lambda: (vistas.pop(0) if vistas else "gerhonte.exe", "Aviso")),
     )
+    monkeypatch.setattr(Player, "_activar_ventana", staticmethod(lambda t: None))
     paso = Step(tipo=StepType.CLICK_AT_XY, extra={
         "x": 1, "y": 2, "win_rel": {"title": "GERHONTE", "proceso": "gerhonte.exe"}})
-    Player._comprobar_foco_esperado(p, paso)
-    assert estado["activada"]
+    Player._comprobar_foco_esperado(p, paso)      # no lanza: se recuperó
 
 
 def test_en_simulacion_no_bloquea(monkeypatch):

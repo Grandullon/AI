@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import (
 
 from core.player import RunStatus
 from core.replay_runner import ReplayRunner, ReplaySummary
+from core.config_ejecucion import opciones_ejecucion
 from core.step_model import Macro
 
 from .theme import aplicar_tono
@@ -195,6 +196,7 @@ class ReplayPanel(QWidget):
             screenshots_dir=self.data_dir / "screenshots",
             data_dir=self.data_dir,
             watchdog_activo=watchdog,
+            **opciones_ejecucion(self.data_dir.parent / "config.json"),
         )
         self._thread = _ReplayThread(self._runner)
         self._thread.log_line.connect(self.log_view.append)

@@ -24,5 +24,11 @@
     "from_addr": "",
     "recipients": [],
     "enviar_al_terminar": false
+  },
+  "ventanas_intrusas": {
+    "_comentario": "Qué hacer si se cuela otra ventana delante durante una ejecución. Se espera a que se vaya y se intenta recuperar la ventana de trabajo; solo se cierran las que aparezcan en cerrar_titulos.",
+    "esperar_s": 15,
+    "intervalo_s": 0.8,
+    "cerrar_titulos": []
   }
 }

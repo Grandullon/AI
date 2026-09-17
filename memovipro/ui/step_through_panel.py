@@ -44,6 +44,7 @@ except Exception:
 
 from core.player import RunStatus
 from core.recorder import Recorder
+from core.config_ejecucion import opciones_ejecucion
 from core.replay_runner import ReplayRunner, ReplaySummary
 from core.step_model import Macro
 
@@ -280,6 +281,7 @@ class StepThroughPanel(QWidget):
             breakpoints=self._breakpoints,
             run_mode=self._run_mode,
             start_idx=start_idx,
+            **opciones_ejecucion(data_dir.parent / "config.json"),
         )
         self._thread = _StepThroughThread(self._runner)
         self._thread.step_status.connect(self._on_step_status)

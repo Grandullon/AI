@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 
 from core.notifier import SmtpConfig
 from core.runner import MacroRunner, RunSummary
+from core.config_ejecucion import opciones_ejecucion
 from core.step_model import Macro
 
 from .theme import aplicar_tono
@@ -205,6 +206,10 @@ class RunPanel(QWidget):
             dry_run=self.dry_run.isChecked(),
             reintentar_ko_al_final=self.reintentar.isChecked(),
             smtp_config=smtp_para_usar,
+            # Ventanas a ignorar y qué hacer con las intrusas: hasta ahora
+            # config.json solo lo leía la línea de comandos, así que desde
+            # aquí la lista iba siempre vacía y configurarla no servía.
+            **opciones_ejecucion(self.config_path),
         )
         if self._runner.checkpoint.invalidado:
             self._append_log("⚠ La macro cambió: checkpoint anterior descartado (todos los DNIs se procesarán).")

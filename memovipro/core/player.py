@@ -63,11 +63,14 @@ class Player:
         stop_after_idx: int | None = None,
         breakpoints: set[int] | None = None,
         run_mode: str = "step",
+        politica_intrusas=None,
     ):
         self.macro = macro
         self.screenshots_dir = Path(screenshots_dir)
         self.logger = logger
         self.ignorar_popups = ignorar_popups or []
+        # Qué hacer si se cuela una ventana delante (ver ventana_intrusa).
+        self.politica_intrusas = politica_intrusas
         self.polling_watchdog_ms = polling_watchdog_ms
         self.on_status = on_status
         self.dry_run = dry_run
@@ -879,14 +882,14 @@ class Player:
         """¿Estoy donde creo? Antes de clicar, confirma que delante está
         el MISMO programa en el que se grabó el paso.
 
-        Es la defensa que evita el peor escenario: que la aplicación haya
-        cambiado de pantalla, se haya cerrado o haya caducado la sesión, y
-        la macro siga clicando y tecleando sobre lo que hubiera detrás.
+        Si se ha colado otra ventana —un aviso de Windows, un mensaje de
+        Teams, el antivirus— no se clica: se tiene paciencia. Se espera a
+        que se vaya sola, se intenta recuperar nuestra ventana, y solo se
+        cierra la intrusa si está apuntada como cerrable. La escalada
+        completa está en core/ventana_intrusa.
 
-        Si no coincide, primero intenta traer la ventana al frente (lo que
-        arregla el caso normal: otra ventana se puso encima). Solo si
-        después sigue sin coincidir, el paso falla — con un motivo que se
-        entiende — en vez de actuar a ciegas.
+        Solo si tras todo eso sigue estorbando, el paso falla — con el
+        título exacto de lo que había delante, para poder apuntarlo.
 
         Los pasos grabados antes de esto no llevan el dato, así que no se
         comprueba nada y se reproducen igual que siempre.
@@ -896,27 +899,66 @@ class Player:
             return
         from .proceso import mismo_programa, proceso_en_primer_plano
         if mismo_programa(esperado, proceso_en_primer_plano()):
-            return
-        # Segundo intento: traer al frente la ventana de trabajo.
-        try:
-            titulo = (
-                self.macro.ventana_principal
-                or ((paso.extra or {}).get("win_rel") or {}).get("title", "")
-            )
-            if titulo:
-                from .window_utils import asegurar_ventana
-                asegurar_ventana(titulo)
-        except Exception as exc:
-            logger.debug("No se pudo reactivar la ventana esperada: {}", exc)
-        actual = proceso_en_primer_plano()
-        if mismo_programa(esperado, actual):
-            return
-        raise RuntimeError(
-            f"La ventana que hay delante no es la esperada: se grabó sobre "
-            f"'{esperado}' y ahora está '{actual or 'desconocido'}'. "
-            "El paso no se ejecuta para no actuar sobre la pantalla "
-            "equivocada."
+            return          # camino normal: ni se entera
+
+        titulo_nuestro = (
+            self.macro.ventana_principal
+            or ((paso.extra or {}).get("win_rel") or {}).get("title", "")
         )
+        from .ventana_intrusa import Politica, resolver
+        res = resolver(
+            esperado,
+            mirar=self._ventana_frontal,
+            activar=lambda: self._activar_ventana(titulo_nuestro),
+            cerrar=self._cerrar_ventana_por_titulo,
+            politica=self.politica_intrusas or Politica(),
+        )
+        if res.ok:
+            if res.intrusa:
+                logger.warning(
+                    "Se había puesto delante {}; recuperado en {:.1f}s ({})",
+                    res.intrusa, res.segundos, " → ".join(res.acciones),
+                )
+            return
+        raise RuntimeError(res.explicacion(esperado))
+
+    @staticmethod
+    def _ventana_frontal() -> tuple[str, str]:
+        """(programa, título) de la ventana que tiene el foco ahora."""
+        from .proceso import nombre_proceso_de_hwnd
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetForegroundWindow()
+            largo = user32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(largo + 1)
+            user32.GetWindowTextW(hwnd, buf, largo + 1)
+            return nombre_proceso_de_hwnd(hwnd), buf.value
+        except Exception:
+            return "", ""
+
+    @staticmethod
+    def _activar_ventana(titulo: str) -> None:
+        if not titulo:
+            return
+        from .window_utils import asegurar_ventana
+        asegurar_ventana(titulo)
+
+    @staticmethod
+    def _cerrar_ventana_por_titulo(titulo: str) -> None:
+        """Cierra con suavidad (WM_CLOSE) la ventana que está delante.
+
+        No se mata el proceso ni se fuerza nada: si la ventana pide
+        confirmación, se queda, y la escalada lo detecta en la siguiente
+        vuelta."""
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetForegroundWindow()
+            user32.PostMessageW(hwnd, 0x0010, 0, 0)   # WM_CLOSE
+            logger.info("Cerrada la ventana intrusa «{}»", titulo)
+        except Exception as exc:
+            logger.debug("No se pudo cerrar «{}»: {}", titulo, exc)
 
     def _click_control(self, paso: Step) -> None:
         """Hace clic respetando una jerarquía de estrategias:

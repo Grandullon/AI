@@ -45,6 +45,7 @@ class ReplayRunner:
         data_dir: str | Path = "data",
         polling_watchdog_ms: int = 300,
         ignorar_popups: list[str] | None = None,
+        politica_intrusas=None,
         watchdog_activo: bool = True,
         on_status: Callable[[RunStatus], None] | None = None,
         on_iter_done: Callable[[int, bool, str], None] | None = None,
@@ -64,6 +65,7 @@ class ReplayRunner:
         self.polling_watchdog_ms = polling_watchdog_ms if watchdog_activo else 60_000
         self.watchdog_activo = watchdog_activo
         self.ignorar_popups = ignorar_popups or []
+        self.politica_intrusas = politica_intrusas
         self.on_status = on_status
         self.on_iter_done = on_iter_done
         self.step_mode = bool(step_mode)
@@ -135,6 +137,7 @@ class ReplayRunner:
                 screenshots_dir=self.screenshots_dir,
                 logger=self.excel_logger,
                 ignorar_popups=self.ignorar_popups,
+                politica_intrusas=self.politica_intrusas,
                 polling_watchdog_ms=self.polling_watchdog_ms,
                 on_status=self.on_status,
                 dry_run=False,
