@@ -500,14 +500,33 @@ class StepEditor(QWidget):
                 filas = {row}
         return sorted(f for f in filas if 0 <= f < len(self.macro.pasos))
 
+    @staticmethod
+    def _texto_confirmar_borrado(filas: list[int]) -> str:
+        """Mensaje de confirmación que dice EXACTAMENTE qué se borra.
+
+        Con una selección suelta (3, 7 y 40), decir "del 3 al 40" se lee
+        como un rango de 38 pasos. Listamos los números de verdad."""
+        nums = [f + 1 for f in filas]
+        if len(nums) == 1:
+            return f"¿Eliminar el paso {nums[0]}?"
+        contiguos = nums == list(range(nums[0], nums[-1] + 1))
+        if contiguos:
+            detalle = f"del {nums[0]} al {nums[-1]}"
+        elif len(nums) <= 12:
+            detalle = "los números " + ", ".join(str(n) for n in nums)
+        else:
+            detalle = ("los números " + ", ".join(str(n) for n in nums[:10])
+                       + f"… y {len(nums) - 10} más")
+        return f"¿Eliminar {len(nums)} pasos?\n\n({detalle})"
+
     def _remove_step(self):
         filas = self._filas_seleccionadas()
         if not filas:
             return
-        if len(filas) > 1 and QMessageBox.question(
-            self, "Eliminar pasos",
-            f"¿Eliminar {len(filas)} pasos seleccionados?\n\n"
-            f"(del {filas[0] + 1} al {filas[-1] + 1})",
+        # Confirmar SIEMPRE: borrar no se puede deshacer, y con la tabla
+        # enfocada un Supr accidental se llevaba un paso sin decir nada.
+        if QMessageBox.question(
+            self, "Eliminar pasos", self._texto_confirmar_borrado(filas),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         ) != QMessageBox.StandardButton.Yes:

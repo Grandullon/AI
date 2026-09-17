@@ -284,7 +284,17 @@ def _ventana_relativa_desde_punto(elem, x: int, y: int) -> dict | None:
         # Solo tiene sentido si el punto cae dentro de la ventana
         if not (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0):
             return None
-        return {"title": titulo, "fx": round(fx, 4), "fy": round(fy, 4)}
+        # Guardamos también el TAMAÑO de la ventana. Con él, al reproducir
+        # se puede distinguir "la ventana solo se ha movido" (traslación
+        # pura, siempre correcta) de "la ventana ha cambiado de tamaño",
+        # donde escalar por fracciones se equivoca en las aplicaciones
+        # Win32 clásicas, que anclan sus controles arriba-izquierda.
+        return {
+            "title": titulo,
+            "fx": round(fx, 4), "fy": round(fy, 4),
+            "w": int(w), "h": int(h),
+            "dx": int(x - r.left), "dy": int(y - r.top),
+        }
     except Exception:
         return None
 
@@ -292,45 +302,36 @@ def _ventana_relativa_desde_punto(elem, x: int, y: int) -> dict | None:
 def _ancla_desde_punto(elem, x: int, y: int) -> dict | None:
     """Texto que identifica el sitio clicado, estilo UiPath.
 
-    Lee el texto del control bajo el cursor por el árbol UIA (no OCR). Si
-    ese control no expone texto —campos de formulario, celdas, iconos—
-    sube hasta 3 niveles buscando el rótulo que lo acompaña, y guarda a qué
-    distancia del texto caía el clic. Así "el campo que hay debajo de DNI"
-    se reproduce aunque el formulario se recoloque.
+    Solo se graba ancla cuando has clicado SOBRE algo que tiene texto
+    propio: un botón, un rótulo, una opción de menú. Se lee del árbol UIA
+    (no OCR), así que es instantáneo y exacto.
 
-    Devuelve None si no encuentra un texto fiable; en ese caso el paso
-    funciona exactamente como antes (coordenadas + imagen).
+    NO se sube a los elementos que lo contienen ni se concatenan los
+    rótulos de dentro. Se intentó, y era peligroso: el texto acababa
+    siendo el de un panel entero o el título del diálogo, y al reproducir
+    el desplazamiento se aplicaba desde el centro de OTRA cosa — un clic
+    seguro de sí mismo a cientos de píxeles del sitio correcto. Un ancla
+    equivocada es peor que no tener ancla, porque no falla: acierta en el
+    sitio que no es.
+
+    Devuelve None si no hay texto propio fiable; entonces el paso se
+    reproduce como siempre (ventana, imagen, coordenadas).
     """
     if elem is None:
         return None
     from .text_anchor import construir_ancla
     from .text_read import extraer_texto_de_control
-
-    actual = elem
-    for nivel in range(4):          # el propio control + 3 ancestros
-        try:
-            # En los ancestros no miramos descendientes: devolverían el
-            # texto de media ventana y el ancla sería cualquier cosa.
-            texto = extraer_texto_de_control(
-                actual, incluir_descendientes=(nivel == 0),
-            )
-        except Exception:
-            texto = ""
-        if texto:
-            try:
-                r = actual.rectangle()
-                ancla = construir_ancla(texto, (r.left, r.top, r.right, r.bottom), x, y)
-            except Exception:
-                ancla = None
-            if ancla:
-                return ancla
-        try:
-            actual = actual.parent()
-        except Exception:
-            return None
-        if actual is None:
-            return None
-    return None
+    try:
+        texto = extraer_texto_de_control(elem, incluir_descendientes=False)
+    except Exception:
+        return None
+    if not texto:
+        return None
+    try:
+        r = elem.rectangle()
+        return construir_ancla(texto, (r.left, r.top, r.right, r.bottom), x, y)
+    except Exception:
+        return None
 
 
 def _selector_desde_punto(x: int, y: int):

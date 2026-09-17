@@ -897,11 +897,12 @@ class Player:
         # Sin ventana_principal: usar la mejor estrategia disponible.
         # Orden: relativas a ventana → matching por imagen → absolutas.
         if not self.macro.ventana_principal:
+            # Orden único en los tres caminos: de lo más fiable a lo menos.
             if win_rel and self._click_window_relative(win_rel, button=button, double=double):
                 return
-            if ancla and self._click_por_ancla(ancla, button=button, double=double):
-                return
             if img_b64 and self._click_imagen(img_b64, button=button, double=double):
+                return
+            if ancla and self._click_por_ancla(ancla, button=button, double=double):
                 return
             if fallback and len(fallback) == 2:
                 x, y = int(fallback[0]), int(fallback[1])
@@ -912,14 +913,14 @@ class Player:
             ctrl = self._resolve_control(paso)
         except Exception as exc:
             # Fallback en cascada: relativa a ventana → imagen → absoluta.
-            if ancla and self._click_por_ancla(ancla, button=button, double=double):
-                logger.warning("Selector no resuelto, localizado por ancla de texto: {}", exc)
-                return
             if win_rel and self._click_window_relative(win_rel, button=button, double=double):
                 logger.warning("Selector no resuelto, fallback a coords relativas a ventana: {}", exc)
                 return
             if img_b64 and self._click_imagen(img_b64, button=button, double=double):
                 logger.warning("Selector no resuelto, fallback a matching por imagen: {}", exc)
+                return
+            if ancla and self._click_por_ancla(ancla, button=button, double=double):
+                logger.warning("Selector no resuelto, localizado por ancla de texto: {}", exc)
                 return
             if fallback and len(fallback) == 2:
                 x, y = int(fallback[0]), int(fallback[1])
@@ -946,123 +947,185 @@ class Player:
             ctrl.click_input(button=button)
 
     def _click_at_xy(self, paso: Step) -> None:
-        """Clic sin selector, pero NO a ciegas.
+        """Clic sin selector.
 
-        Al grabar ya se guardaban el texto del sitio, la posición relativa
-        a la ventana y una miniatura; hasta ahora este paso los ignoraba y
-        clicaba las coordenadas literales, así que bastaba mover la ventana
-        para que fallara. Ahora prueba en orden: texto → relativa a la
-        ventana → imagen → coordenadas.
+        Los pasos grabados A PARTIR DE AHORA llevan respaldos con los que
+        recuperarse si la ventana se ha movido: se prueba la posición
+        relativa a la ventana, luego la imagen y luego el texto, antes de
+        caer en las coordenadas.
 
-        Si la ventana está donde estaba, todos los caminos llevan al mismo
-        punto: el comportamiento no cambia. Solo se desvía cuando localiza
-        el destino en otro sitio, que es justo cuando las coordenadas
-        literales habrían fallado. Con `extra.solo_coordenadas: true` se
-        fuerza el comportamiento literal de siempre.
+        Los pasos GRABADOS ANTES se reproducen exactamente igual que
+        siempre: coordenadas literales. Sus datos de respaldo no guardan
+        el tamaño que tenía la ventana, y sin ese dato no se puede
+        distinguir "se ha movido" (recuperable) de "ha cambiado de tamaño"
+        (donde escalar se equivoca). Se prefiere no tocar lo que ya
+        funciona; para aprovechar los respaldos, vuelve a grabar el paso.
         """
         extra = paso.extra or {}
         x, y = int(extra.get("x", 0)), int(extra.get("y", 0))
         button = str(extra.get("button", "left"))
         double = bool(extra.get("double", False))
-        if not extra.get("solo_coordenadas"):
-            ancla = extra.get("texto_ancla")
-            if ancla and self._click_por_ancla(ancla, button=button, double=double):
-                return
-            win_rel = extra.get("win_rel")
-            if win_rel and self._click_window_relative(win_rel, button=button, double=double):
+        win_rel = extra.get("win_rel") or {}
+        # La marca de "grabado con respaldos" es el tamaño de la ventana.
+        tiene_respaldos = bool(win_rel.get("w")) and bool(win_rel.get("h"))
+        if tiene_respaldos and not extra.get("solo_coordenadas"):
+            if self._click_window_relative(win_rel, button=button, double=double):
                 return
             img_b64 = extra.get("img_b64")
             if img_b64 and self._click_imagen(img_b64, button=button, double=double):
                 return
+            ancla = extra.get("texto_ancla")
+            if ancla and self._click_por_ancla(ancla, button=button, double=double):
+                return
         self._click_xy(x, y, button=button, double=double)
 
     # ---- Ancla de texto ("clica donde pone X", estilo UiPath) ----
-    def _click_por_ancla(self, ancla: dict, button: str = "left",
+    def _click_por_ancla(self, ancla, button: str = "left",
                          double: bool = False) -> bool:
         """Clica usando el TEXTO capturado al grabar.
 
-        Dos búsquedas con la misma cadena: primero el árbol UIA (exacto e
-        instantáneo) y, si la aplicación no expone nada, OCR de la pantalla.
-        Devuelve True si consiguió clicar."""
-        if not ancla or not ancla.get("texto"):
-            return False
-        if self._click_ancla_uia(ancla, button=button, double=double):
-            return True
-        return self._click_ancla_ocr(ancla, button=button, double=double)
+        Es el ÚLTIMO recurso antes de las coordenadas: se prueba cuando el
+        selector, la posición relativa a la ventana y la imagen ya han
+        fallado. Dos búsquedas con la misma cadena, ambas acotadas a la
+        ventana de trabajo: primero el árbol UIA (exacto e instantáneo) y,
+        si la aplicación no expone nada, OCR de esa ventana.
 
-    def _click_ancla_uia(self, ancla: dict, button: str = "left",
-                         double: bool = False) -> bool:
-        """Busca el texto del ancla en el árbol de accesibilidad."""
-        if not _HAS_PYWINAUTO or self.dry_run:
-            if self.dry_run:
-                logger.info('[dry-run] ancla de texto "{}"', ancla.get("texto"))
-            return False
-        buscado = str(ancla.get("texto", ""))
-        from .text_anchor import punto_desde_ancla
-        from .text_read import extraer_texto_de_control, texto_contiene
+        Devuelve True solo si ha clicado. Nunca lanza: si algo va mal, la
+        cascada sigue con las coordenadas de siempre.
+        """
         try:
-            raiz = None
-            if self.macro.ventana_principal:
-                win = Desktop(backend="uia").window(
-                    title_re=f".*{re.escape(self.macro.ventana_principal)}.*"
-                )
-                if win.exists(timeout=0.5):
-                    raiz = win
-            if raiz is None:
+            if not isinstance(ancla, dict) or not ancla.get("texto"):
                 return False
-            for ctrl in raiz.descendants():
+            # Sin ventana de trabajo definida no hay dónde acotar la
+            # búsqueda, y buscar por todo el escritorio acaba clicando en
+            # otra aplicación (o en el propio MemoviPro, que muestra las
+            # descripciones de los pasos). Preferimos no usar el ancla.
+            if not getattr(self.macro, "ventana_principal", ""):
+                return False
+            if getattr(self, "dry_run", False):
+                logger.info('[dry-run] ancla de texto "{}"', ancla.get("texto"))
+                return False
+            win, rect_win = self._ventana_de_trabajo()
+            if win is None:
+                return False
+            punto = self._punto_ancla_uia(win, rect_win, ancla)
+            if punto is None:
+                punto = self._punto_ancla_ocr(win, rect_win, ancla)
+            if punto is None:
+                return False
+        except Exception as exc:
+            logger.debug("Ancla de texto falló: {}", exc)
+            return False
+        # El clic va FUERA del try: si falla, debe propagarse en vez de
+        # que la cascada intente otra vía y acabe clicando dos veces.
+        self._click_xy(punto[0], punto[1], button=button, double=double)
+        return True
+
+    def _ventana_de_trabajo(self):
+        """(ventana, rect) de la ventana principal de la macro, o (None, None)."""
+        if not _HAS_PYWINAUTO:
+            return None, None
+        try:
+            win = Desktop(backend="uia").window(
+                title_re=f".*{re.escape(self.macro.ventana_principal)}.*"
+            )
+            if not win.exists(timeout=0.5):
+                return None, None
+            if win.is_minimized() or not win.is_visible():
+                return None, None
+            r = win.rectangle()
+            return win, (r.left, r.top, r.right, r.bottom)
+        except Exception:
+            return None, None
+
+    def _punto_ancla_uia(self, win, rect_win, ancla: dict):
+        """Busca el texto del ancla en el árbol de accesibilidad.
+
+        Recorre TODOS los candidatos y se queda con el mejor en vez de con
+        el primero del árbol: exige texto idéntico y, a igualdad, prefiere
+        el control más pequeño. Descarta rectángulos degenerados (los
+        controles de pestañas no activas devuelven 0,0,0,0) y puntos que
+        caigan fuera de la ventana.
+        """
+        from .text_anchor import puntuar_candidato, punto_desde_ancla, punto_dentro
+        from .text_read import extraer_texto_de_control
+        buscado = str(ancla.get("texto", ""))
+        mejor = None
+        mejor_punto = None
+        try:
+            for ctrl in win.descendants():
                 try:
+                    if not ctrl.is_visible():
+                        continue
                     txt = extraer_texto_de_control(ctrl, incluir_descendientes=False)
-                    if not txt or not texto_contiene(txt, buscado):
+                    if not txt:
                         continue
                     r = ctrl.rectangle()
-                    punto = punto_desde_ancla((r.left, r.top, r.right, r.bottom), ancla)
+                    rect = (r.left, r.top, r.right, r.bottom)
+                    nota = puntuar_candidato(txt, buscado, rect)
+                    if nota is None or (mejor is not None and nota >= mejor):
+                        continue
+                    punto = punto_desde_ancla(rect, ancla)
+                    if punto is None or not punto_dentro(punto, rect_win):
+                        continue
+                    mejor, mejor_punto = nota, punto
                 except Exception:
                     continue
-                if punto:
-                    logger.info(
-                        'Ancla de texto "{}" localizada por UIA → clic en {}',
-                        buscado, punto,
-                    )
-                    self._click_xy(punto[0], punto[1], button=button, double=double)
-                    return True
         except Exception as exc:
-            logger.debug("Ancla por UIA falló: {}", exc)
-        return False
+            logger.debug("Recorrido UIA del ancla falló: {}", exc)
+            return None
+        if mejor_punto is not None:
+            logger.info('Ancla "{}" localizada por UIA → {}', buscado, mejor_punto)
+        return mejor_punto
 
-    def _click_ancla_ocr(self, ancla: dict, button: str = "left",
-                         double: bool = False) -> bool:
-        """Último recurso: busca el texto del ancla por OCR en pantalla."""
-        if self.dry_run:
-            return False
+    def _punto_ancla_ocr(self, win, rect_win, ancla: dict):
+        """Último recurso: OCR, SOLO de la ventana de trabajo.
+
+        Buscar por toda la pantalla clicaba en cualquier otra aplicación
+        que mostrase la misma palabra. Y solo se usa con anclas en las que
+        clicaste encima del texto: con desplazamientos grandes, el OCR
+        parte del centro de la palabra pintada y la grabación partió del
+        centro del control — marcos distintos, clic desviado.
+        """
+        from .text_anchor import ancla_admite_ocr, punto_desde_centro, punto_dentro
+        if not ancla_admite_ocr(ancla):
+            return None
         buscado = str(ancla.get("texto", ""))
+        shot = None
         try:
             from .ocr import disponible as ocr_disponible, localizar_texto_en_imagen
             if not ocr_disponible():
-                return False
-            from .screenshot import capturar_pantalla_completa_con_offset
-            full = capturar_pantalla_completa_con_offset(
-                self.screenshots_dir, prefijo="ancla"
+                return None
+            from .screenshot import capturar_ventana_pywinauto
+            shot = capturar_ventana_pywinauto(
+                self.screenshots_dir, win, prefijo="ancla"
             )
-            if full is None:
-                return False
-            img_path, off_x, off_y = full
-            hit = localizar_texto_en_imagen(str(img_path), buscado, min_confidence=60)
+            if not shot:
+                return None
+            hit = localizar_texto_en_imagen(str(shot), buscado, min_confidence=70)
             if hit is None:
-                return False
-            from .text_anchor import punto_desde_centro
-            punto = punto_desde_centro(off_x + hit.x, off_y + hit.y, ancla)
-            if not punto:
-                return False
+                return None
+            punto = punto_desde_centro(
+                rect_win[0] + hit.x, rect_win[1] + hit.y, ancla,
+            )
+            if punto is None or not punto_dentro(punto, rect_win):
+                return None
             logger.info(
-                'Ancla de texto "{}" localizada por OCR (conf={}) → clic en {}',
+                'Ancla "{}" localizada por OCR (conf={}) → {}',
                 buscado, hit.confidence, punto,
             )
-            self._click_xy(punto[0], punto[1], button=button, double=double)
-            return True
+            return punto
         except Exception as exc:
             logger.debug("Ancla por OCR falló: {}", exc)
-        return False
+            return None
+        finally:
+            # La captura es desechable: si no se borra, cada intento deja
+            # un PNG y una tanda larga llena el disco.
+            if shot:
+                try:
+                    Path(shot).unlink()
+                except Exception:
+                    pass
 
     def _click_window_relative(self, win_rel: dict, button: str = "left", double: bool = False) -> bool:
         """Hace clic usando coordenadas relativas a una ventana.
@@ -1098,9 +1161,41 @@ class Player:
             win = Desktop(backend="uia").window(title_re=f".*{re.escape(title)}.*")
             if not win.exists(timeout=1.0):
                 return False
+            # Una ventana MINIMIZADA casa igual (pywinauto no filtra por
+            # visibilidad) y su rectángulo es del orden de (-32000,-32000):
+            # el clic se iba fuera de la pantalla.
+            try:
+                if win.is_minimized() or not win.is_visible():
+                    logger.debug("Ventana '{}' minimizada u oculta: sin coords relativas", title)
+                    return False
+            except Exception:
+                pass
             r = win.rectangle()
-            x = int(r.left + fx * r.width())
-            y = int(r.top + fy * r.height())
+            w_ahora, h_ahora = r.width(), r.height()
+            w_grab = int(win_rel.get("w") or 0)
+            h_grab = int(win_rel.get("h") or 0)
+            if w_grab and h_grab and abs(w_ahora - w_grab) <= 2 and abs(h_ahora - h_grab) <= 2:
+                # MISMO tamaño: la ventana solo se ha movido. Traslación
+                # pura, que es exacta. Escalar por fracciones aquí metía
+                # un error de 1 px por el redondeo.
+                x = int(r.left + int(win_rel.get("dx", 0)))
+                y = int(r.top + int(win_rel.get("dy", 0)))
+            elif w_grab and h_grab:
+                # La ventana cambió de tamaño. Escalar por fracciones
+                # asume que el formulario se estira proporcionalmente, y
+                # las aplicaciones Win32 clásicas NO lo hacen: anclan sus
+                # controles arriba-izquierda. Mejor no adivinar y dejar
+                # que decidan la imagen o las coordenadas grabadas.
+                logger.debug(
+                    "Ventana '{}' redimensionada ({}x{} → {}x{}): sin coords relativas",
+                    title, w_grab, h_grab, w_ahora, h_ahora,
+                )
+                return False
+            else:
+                # Macro antigua, sin tamaño guardado: comportamiento de
+                # siempre (escalado por fracciones), con el redondeo bien.
+                x = int(round(r.left + fx * w_ahora))
+                y = int(round(r.top + fy * h_ahora))
         except Exception as exc:
             logger.debug("click_window_relative falló para '{}': {}", title, exc)
             return False
@@ -1186,7 +1281,7 @@ class Player:
         if region == "ventana_objetivo" and self.macro.ventana_principal:
             try:
                 win = Desktop(backend="uia").window(
-                    title_re=f".*{self.macro.ventana_principal}.*"
+                    title_re=f".*{re.escape(self.macro.ventana_principal)}.*"
                 )
                 if win.exists(timeout=1.0):
                     from .screenshot import capturar_ventana_pywinauto
