@@ -824,13 +824,17 @@ class Player:
         return False
 
     def _resolve_control(self, paso: Step):
-        """Resuelve el control objetivo por selector simbólico.
+        """Busca el control por su NOMBRE, no por dónde estaba.
 
-        Solo se llama cuando hay `ventana_principal` configurada en la
-        macro. Sin ventana de referencia, la API de pywinauto no es
-        fiable (Desktop().windows() devuelve UIAWrapper sin
-        child_window), así que en ese caso usamos directamente las
-        coordenadas (`fallback_xy`) en `_click_control`.
+        Es la forma más fiable de encontrar algo: «el elemento del árbol
+        que pone Incidencias», «el botón Guardar». Sobrevive a que la
+        ventana se mueva, cambie de tamaño o recoloque sus controles, que
+        es justo lo que las coordenadas no aguantan.
+
+        Busca en tres sitios, por orden de precisión:
+          1. La ventana de ESTE paso (anotada al grabarlo).
+          2. La «ventana principal» de la macro, si está puesta.
+          3. Todas las ventanas visibles.
         """
         sel = paso.selector
         if sel is None or sel.is_empty():
@@ -847,15 +851,28 @@ class Player:
             kwargs["class_name"] = sel.class_name
 
         desktop = Desktop(backend="uia")
+        espera = max(0.3, min(paso.timeout_s, 5.0))
 
+        # 1. La ventana de este paso: lo más preciso y lo más rápido.
+        spec = self._spec_ventana_del_paso(paso)
+        if spec is not None:
+            ctrl = self._buscar_en(spec, kwargs, espera)
+            if ctrl is not None:
+                return ctrl
+
+        # 2. La ventana principal de la macro (si alguien la rellenó).
         if self.macro.ventana_principal:
-            win_spec = desktop.window(title_re=f".*{self.macro.ventana_principal}.*")
-            ctrl = win_spec.child_window(**kwargs)
-            ctrl.wait("visible enabled", timeout=paso.timeout_s)
-            return ctrl
+            try:
+                win_spec = desktop.window(
+                    title_re=f".*{re.escape(self.macro.ventana_principal)}.*"
+                )
+                ctrl = self._buscar_en(win_spec, kwargs, espera)
+                if ctrl is not None:
+                    return ctrl
+            except Exception as exc:
+                logger.debug("Ventana principal no utilizable: {}", exc)
 
-        # Sin ventana_principal: iterar y pasar handle a Desktop().window()
-        # para obtener un WindowSpecification válido (que sí tiene child_window).
+        # 3. Recorrer las ventanas visibles.
         last_err: Exception | None = None
         for w in desktop.windows():
             try:
@@ -865,18 +882,69 @@ class Player:
             except Exception:
                 continue
             try:
-                spec = desktop.window(handle=handle)
-                ctrl = spec.child_window(**kwargs)
-                if ctrl.exists(timeout=0.3):
-                    try:
-                        ctrl.wait("visible enabled", timeout=min(paso.timeout_s, 3.0))
-                    except Exception as exc:
-                        logger.debug("Control encontrado pero no visible/enabled a tiempo: {}", exc)
+                ctrl = self._buscar_en(desktop.window(handle=handle), kwargs, 0.3)
+                if ctrl is not None:
                     return ctrl
             except Exception as exc:
                 last_err = exc
                 continue
         raise RuntimeError(f"No se encontró control {kwargs}: {last_err}")
+
+    def _buscar_en(self, spec, kwargs: dict, espera: float):
+        """Busca el control dentro de `spec`. None si no está.
+
+        Si no aparece con todos los datos, se reintenta SIN el
+        identificador automático. Hace falta para aplicaciones Delphi como
+        GERHONTE: ahí el identificador es el número de ventana del sistema
+        («71442»), que cambia en cada ejecución, mientras que el nombre y
+        el tipo de control se mantienen.
+        """
+        intentos = [kwargs]
+        if kwargs.get("auto_id") and (kwargs.get("title") or kwargs.get("class_name")):
+            sin_id = {k: v for k, v in kwargs.items() if k != "auto_id"}
+            intentos.append(sin_id)
+        for n, criterios in enumerate(intentos):
+            try:
+                ctrl = spec.child_window(**criterios)
+                if not ctrl.exists(timeout=espera if n == 0 else 0.5):
+                    continue
+                try:
+                    ctrl.wait("visible enabled", timeout=min(espera, 3.0))
+                except Exception as exc:
+                    logger.debug("Control hallado pero no listo a tiempo: {}", exc)
+                if n:
+                    logger.info(
+                        "Control encontrado sin el identificador automático "
+                        "(cambia en cada ejecución): {}", criterios,
+                    )
+                return ctrl
+            except Exception:
+                continue
+        return None
+
+    def _spec_ventana_del_paso(self, paso: Step):
+        """Ventana en la que se grabó el paso, lista para buscar dentro."""
+        if not _HAS_PYWINAUTO:
+            return None
+        from .ventana_paso import es_activable, titulo_equivalente, ventana_esperada
+        esperada = ventana_esperada(paso)
+        titulo = esperada.get("titulo") or ""
+        if not titulo or not es_activable(titulo):
+            return None
+        try:
+            desktop = Desktop(backend="uia")
+            for w in desktop.windows():
+                try:
+                    if not w.is_visible() or w.is_minimized():
+                        continue
+                    if not titulo_equivalente(titulo, w.window_text()):
+                        continue
+                    return desktop.window(handle=w.handle)
+                except Exception:
+                    continue
+        except Exception as exc:
+            logger.debug("No se pudo acotar a la ventana «{}»: {}", titulo, exc)
+        return None
 
     def _comprobar_foco_esperado(self, paso: Step) -> None:
         """Pone delante la ventana de ESTE paso antes de actuar.
@@ -1059,21 +1127,12 @@ class Player:
         button = str(extra.get("button", "left"))
         double = bool(extra.get("double", False))
 
-        # Sin ventana_principal: usar la mejor estrategia disponible.
-        # Orden: relativas a ventana → matching por imagen → absolutas.
-        if not self.macro.ventana_principal:
-            # Orden único en los tres caminos: de lo más fiable a lo menos.
-            if win_rel and self._click_window_relative(win_rel, button=button, double=double):
-                return
-            if img_b64 and self._click_imagen(img_b64, button=button, double=double):
-                return
-            if ancla and self._click_por_ancla(ancla, button=button, double=double):
-                return
-            if fallback and len(fallback) == 2:
-                x, y = int(fallback[0]), int(fallback[1])
-                self._click_xy(x, y, button=button, double=double)
-                return
-
+        # El selector va SIEMPRE primero. Antes solo se usaba si la macro
+        # tenía rellenado el campo «ventana principal», y como casi nadie
+        # lo rellena, en la práctica nunca se buscaba el botón por su
+        # nombre: se clicaba en las coordenadas donde estaba al grabar. Por
+        # eso una macro dejaba de funcionar en cuanto algo se recolocaba,
+        # teniendo guardado «el botón Guardar» o «el elemento Incidencias».
         try:
             ctrl = self._resolve_control(paso)
         except Exception as exc:
