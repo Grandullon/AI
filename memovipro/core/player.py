@@ -879,39 +879,72 @@ class Player:
         raise RuntimeError(f"No se encontró control {kwargs}: {last_err}")
 
     def _comprobar_foco_esperado(self, paso: Step) -> None:
-        """¿Estoy donde creo? Antes de clicar, confirma que delante está
-        el MISMO programa en el que se grabó el paso.
+        """Pone delante la ventana de ESTE paso antes de actuar.
 
-        Si se ha colado otra ventana —un aviso de Windows, un mensaje de
-        Teams, el antivirus— no se clica: se tiene paciencia. Se espera a
-        que se vaya sola, se intenta recuperar nuestra ventana, y solo se
-        cierra la intrusa si está apuntada como cerrable. La escalada
-        completa está en core/ventana_intrusa.
+        Una macro real pasa por muchas ventanas (menú, informes, filtro,
+        vista previa, guardar, LibreOffice...), así que no vale con mirar
+        una «ventana principal» de la macro: lo que manda es la ventana en
+        la que se grabó cada paso, que va anotada en él.
 
-        Solo si tras todo eso sigue estorbando, el paso falla — con el
-        título exacto de lo que había delante, para poder apuntarlo.
+        Tres escalones:
+          1. Si delante ya está esa ventana, no se toca nada.
+          2. Si no, se la busca y se la trae al frente. Esto es lo que
+             arregla el caso de "el diálogo se ha abierto detrás": Windows
+             abre los diálogos por detrás cuando la aplicación no tiene
+             permiso para robar el foco, y hasta ahora se clicaba sobre lo
+             que hubiera delante.
+          3. Si ni siquiera se encuentra, se comprueba al menos que el
+             programa sea el correcto y, si se ha colado otra cosa, entra
+             la escalada con paciencia de core/ventana_intrusa.
 
-        Los pasos grabados antes de esto no llevan el dato, así que no se
-        comprueba nada y se reproducen igual que siempre.
+        Nunca se activa el escritorio ni la barra de tareas, aunque un
+        paso diga que se grabó ahí: traerlos al frente minimizaría todo.
         """
-        esperado = str(((paso.extra or {}).get("win_rel") or {}).get("proceso", ""))
-        if not esperado or self.dry_run:
+        if self.dry_run:
             return
-        from .proceso import mismo_programa, proceso_en_primer_plano
-        if mismo_programa(esperado, proceso_en_primer_plano()):
-            return          # camino normal: ni se entera
-
-        titulo_nuestro = (
-            self.macro.ventana_principal
-            or ((paso.extra or {}).get("win_rel") or {}).get("title", "")
+        from .proceso import mismo_programa
+        from .ventana_paso import (
+            es_activable, hay_que_activar, titulo_equivalente, ventana_esperada,
         )
+
+        esperada = ventana_esperada(paso)
+        if esperada["titulo"] and not es_activable(esperada["titulo"]):
+            # El paso se grabó sobre el escritorio o la barra de tareas
+            # (pasa cuando un clic cae fuera de toda ventana). No hay nada
+            # que comprobar ni que activar: el escritorio siempre está.
+            return
+        proceso, titulo = self._ventana_frontal()
+
+        # 1. Ya estamos donde toca.
+        if esperada["titulo"] and titulo_equivalente(esperada["titulo"], titulo):
+            return
+
+        # 2. Traer al frente la ventana de este paso.
+        recuperada = False
+        if hay_que_activar(esperada, titulo, proceso):
+            recuperada = self._traer_ventana_del_paso(esperada)
+            if recuperada:
+                logger.info(
+                    "Ventana «{}» recuperada al frente (estaba detrás de «{}»)",
+                    esperada["titulo"], titulo or "otra",
+                )
+                return
+
+        # 3. Ni se encuentra por título: al menos que el programa cuadre.
+        proc_esperado = esperada["proceso"]
+        if not proc_esperado:
+            return          # paso antiguo sin el dato: como siempre
+        proceso, titulo = self._ventana_frontal()
+        if mismo_programa(proc_esperado, proceso):
+            return
+
         from .ventana_intrusa import Politica, resolver
         res = resolver(
-            esperado,
+            proc_esperado,
             mirar=self._ventana_frontal,
-            activar=lambda: self._activar_ventana(titulo_nuestro),
+            activar=lambda: self._traer_ventana_del_paso(esperada),
             cerrar=self._cerrar_ventana_por_titulo,
-            politica=self.politica_intrusas or Politica(),
+            politica=getattr(self, "politica_intrusas", None) or Politica(),
         )
         if res.ok:
             if res.intrusa:
@@ -920,7 +953,52 @@ class Player:
                     res.intrusa, res.segundos, " → ".join(res.acciones),
                 )
             return
-        raise RuntimeError(res.explicacion(esperado))
+        raise RuntimeError(res.explicacion(proc_esperado))
+
+    def _traer_ventana_del_paso(self, esperada: dict) -> bool:
+        """Busca la ventana del paso y la pone delante. True si lo logró.
+
+        Se busca por título y, si hay varias iguales, se prefiere la del
+        programa correcto. No lanza: si no está, el llamador decide.
+        """
+        titulo = esperada.get("titulo") or ""
+        if not titulo or not _HAS_PYWINAUTO:
+            return False
+        from .proceso import mismo_programa, nombre_proceso_de_hwnd
+        from .ventana_paso import titulo_equivalente
+        try:
+            candidatas = []
+            for w in Desktop(backend="uia").windows():
+                try:
+                    if not titulo_equivalente(titulo, w.window_text()):
+                        continue
+                    if w.is_minimized() or not w.is_visible():
+                        continue
+                except Exception:
+                    continue
+                candidatas.append(w)
+            if not candidatas:
+                return False
+            elegida = candidatas[0]
+            proc = esperada.get("proceso") or ""
+            if proc and len(candidatas) > 1:
+                # Varias con el mismo título: quedarse con la del programa
+                # que tocaba (p. ej. dos «Abrir» de aplicaciones distintas).
+                for w in candidatas:
+                    try:
+                        if mismo_programa(proc, nombre_proceso_de_hwnd(w.handle)):
+                            elegida = w
+                            break
+                    except Exception:
+                        continue
+            from .window_utils import _activar_agresivo
+            _activar_agresivo(elegida.handle)
+        except Exception as exc:
+            logger.debug("No se pudo traer «{}» al frente: {}", titulo, exc)
+            return False
+        # Confirmar: activar no siempre funciona a la primera.
+        _, ahora = self._ventana_frontal()
+        return titulo_equivalente(titulo, ahora)
 
     @staticmethod
     def _ventana_frontal() -> tuple[str, str]:

@@ -335,9 +335,19 @@ def _ventana_relativa_desde_punto(elem, x: int, y: int) -> dict | None:
             proceso = nombre_proceso_de_hwnd(top.handle)
         except Exception:
             proceso = ""
+        # Clase de la ventana: en aplicaciones Delphi/Win32 como GERHONTE
+        # es estable ("TFABPMEN1") y no cambia con los datos, al contrario
+        # que el título. Sirve para reconocer la ventana aunque el título
+        # lleve dentro el nombre de un fichero o de un paciente.
+        clase = ""
+        try:
+            clase = (top.class_name() or "").strip()
+        except Exception:
+            clase = ""
         return {
             "title": titulo,
             "proceso": proceso,
+            "clase": clase,
             "fx": round(fx, 4), "fy": round(fy, 4),
             "w": int(w), "h": int(h),
             "dx": int(x - r.left), "dy": int(y - r.top),

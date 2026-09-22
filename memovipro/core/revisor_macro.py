@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass, field
 
 from .step_model import Macro, Step, StepType
+from .ventana_paso import es_activable
 
 # Gravedad: "alto" = puede hacer daño o fallar seguro; "medio" = va a dar
 # problemas tarde o temprano; "info" = conviene saberlo.
@@ -152,6 +153,19 @@ def revisar(macro: Macro) -> Informe:
 
         if _clic_a_ciegas(paso):
             a_ciegas.append(i)
+
+        # Un paso grabado sobre el escritorio suele ser un clic que cayó
+        # fuera de toda ventana: o sobra, o la ventana se había cerrado
+        # antes de tiempo. Sale en macros reales.
+        titulo_win = str(((paso.extra or {}).get("win_rel") or {}).get("title", ""))
+        if titulo_win and not es_activable(titulo_win):
+            inf.avisos.append(Aviso(
+                MEDIO, i, "Clic sobre el escritorio",
+                f"Este paso se grabó sobre «{titulo_win}», que no es una "
+                "ventana de trabajo. Suele significar que el clic cayó "
+                "fuera de todo, o que la ventana ya se había cerrado. "
+                "Comprueba que hace falta.",
+            ))
 
         if _apunta_a_celda_de_columna(paso):
             inf.avisos.append(Aviso(
