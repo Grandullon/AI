@@ -23,12 +23,23 @@ def _simular_windows():
         yield
         return
     import core.recorder as rec
+    from core.player import Player
+
     original = rec._modificadores_realmente_pulsados
     rec._modificadores_realmente_pulsados = lambda: set()
+    # En Windows hay SIEMPRE una ventana delante (en el runner, la
+    # terminal). En Linux la consulta devuelve vacío y eso se interpreta
+    # como "no lo sé", que deja pasar cualquier comprobación: por eso un
+    # test que olvide simular esta consulta pasaba aquí y fallaba en el
+    # build. Simulamos una ventana ajena para que salte antes.
+    original_frontal = Player._ventana_frontal
+    Player._ventana_frontal = staticmethod(
+        lambda: ("desconocido.exe", "Ventana cualquiera"))
     try:
         yield
     finally:
         rec._modificadores_realmente_pulsados = original
+        Player._ventana_frontal = original_frontal
 
 
 # Nota para quien desarrolle en Linux: la suite se ejecuta también con

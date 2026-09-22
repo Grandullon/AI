@@ -188,7 +188,10 @@ def test_si_el_programa_coincide_sigue_adelante(monkeypatch):
     p = Player.__new__(Player)
     p.dry_run = False
     p.macro = Macro(nombre="m", pasos=[], ventana_principal="GERHONTE")
-    monkeypatch.setattr("core.proceso.proceso_en_primer_plano", lambda: "gerhonte.exe")
+    # La comprobación mira la ventana que hay delante, no solo el
+    # proceso: hay que simular esa consulta y no la antigua.
+    monkeypatch.setattr(Player, "_ventana_frontal",
+                        staticmethod(lambda: ("gerhonte.exe", "GERHONTE")))
     paso = Step(tipo=StepType.CLICK_AT_XY, extra={
         "x": 1, "y": 2, "win_rel": {"proceso": "gerhonte.exe"}})
     Player._comprobar_foco_esperado(p, paso)      # no lanza
