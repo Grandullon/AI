@@ -68,12 +68,33 @@ class Selector:
         """
         if self.is_empty():
             return False
-        if (self.name or "").strip():
+        nombre = (self.name or "").strip()
+        if nombre and not _nombre_es_dato(nombre):
             return True
         auto_id = str(self.auto_id or "").strip()
         if auto_id and not _auto_id_volatil(auto_id):
             return True
         return False
+
+
+_RE_FECHA = re.compile(r"\b\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}\b")
+_RE_HORA = re.compile(r"\b\d{1,2}:\d{2}(:\d{2})?\b")
+_RE_SOLO_CIFRAS = re.compile(r"^[\d\s.,:/%€$+\-]+$")
+
+
+def _nombre_es_dato(nombre: str) -> bool:
+    """¿El «nombre» del control es en realidad el DATO que contiene?
+
+    Hay controles que no publican un rótulo sino su valor: el selector de
+    fecha de GERHONTE se llama «01/09/2026», es decir, se llama como la
+    fecha que tiene puesta. Eso no identifica el control —mañana se
+    llamará distinto— y buscarlo por ese nombre falla o, peor, encuentra
+    otro. Fechas, horas y cifras sueltas no cuentan como nombre.
+    """
+    n = (nombre or "").strip()
+    if not n:
+        return False
+    return bool(_RE_FECHA.search(n) or _RE_HORA.search(n) or _RE_SOLO_CIFRAS.match(n))
 
 
 def _auto_id_volatil(auto_id: str) -> bool:

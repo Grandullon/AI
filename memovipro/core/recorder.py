@@ -502,24 +502,37 @@ def _elemento_significativo(elem):
 def _selector_desde_punto(x: int, y: int):
     """Resuelve (x,y) a un selector simbólico + respaldos robustos.
 
-    Devuelve (selector_o_None, descripción, win_rel_o_None, ancla_o_None):
+    Devuelve (selector_o_None, descripción, win_rel_o_None, ancla_o_None,
+    en_control_o_None):
       - win_rel: {"title", "fx", "fy"}, coordenadas relativas a la ventana.
       - ancla:   {"texto", "dx", "dy"}, el TEXTO que hay en ese sitio y a
         qué distancia cayó el clic (ver core/text_anchor).
     Si falla cualquier paso, los campos correspondientes son None.
     """
     if not _HAS_PYWINAUTO:
-        return None, f"({x},{y})", None, None
+        return None, f"({x},{y})", None, None, None
     try:
         elem = Desktop(backend="uia").from_point(x, y)
     except Exception:
-        return None, f"({x},{y})", None, None
+        return None, f"({x},{y})", None, None, None
     # La posición de la ventana se calcula con el elemento ORIGINAL (es
     # el que está bajo el ratón); la identidad, con la fila que lo
     # contiene si la hay (ver _elemento_significativo).
     win_rel = _ventana_relativa_desde_punto(elem, x, y)
     elem = _elemento_significativo(elem)
     ancla = _ancla_desde_punto(elem, x, y)
+    # En qué parte del control cayó el clic. Al reproducir, el control se
+    # busca por su nombre y se pulsa en ESE mismo sitio, no en su centro:
+    # en un selector de fecha el centro es el texto y no la flechita del
+    # desplegable; en un calendario, el centro es un día cualquiera.
+    en_control = None
+    try:
+        r = elem.rectangle()
+        w, h = int(r.width()), int(r.height())
+        if w > 0 and h > 0 and r.left <= x <= r.right and r.top <= y <= r.bottom:
+            en_control = {"dx": int(x - r.left), "dy": int(y - r.top), "w": w, "h": h}
+    except Exception:
+        en_control = None
     try:
         name = (elem.window_text() or "").strip()
     except Exception:
@@ -543,9 +556,9 @@ def _selector_desde_punto(x: int, y: int):
         class_name=class_name or None,
     )
     if sel.is_empty():
-        return None, f"({x},{y})", win_rel, ancla
+        return None, f"({x},{y})", win_rel, ancla, en_control
     desc = name or ctrl_type or class_name or f"({x},{y})"
-    return sel, desc, win_rel, ancla
+    return sel, desc, win_rel, ancla, en_control
 
 
 class Recorder:
@@ -1227,13 +1240,16 @@ class Recorder:
                 desc = evt.descripcion
                 win_rel = None
                 ancla = None
+                en_control = None
                 if resolver_selectores:
                     # Preferimos SIEMPRE lo resuelto en vivo: se calculó
                     # con la pantalla tal y como estaba al clicar.
-                    if evt.resuelto is not None:
-                        sel, desc, win_rel, ancla = evt.resuelto
-                    else:
-                        sel, desc, win_rel, ancla = _selector_desde_punto(evt.x, evt.y)
+                    res = evt.resuelto if evt.resuelto is not None \
+                        else _selector_desde_punto(evt.x, evt.y)
+                    # Se aceptan resultados de 4 o 5 elementos: el quinto
+                    # (dónde cayó el clic dentro del control) es posterior.
+                    sel, desc, win_rel, ancla = res[:4]
+                    en_control = res[4] if len(res) > 4 else None
                 # Prefijos para la descripción del paso
                 mods_label = evt.modifiers.upper() + " " if evt.modifiers else ""
                 accion = "Doble click" if evt.double else "Click"
@@ -1252,6 +1268,8 @@ class Recorder:
                         img_b64 = ""
                 if sel is not None:
                     extra: dict = {"fallback_xy": [evt.x, evt.y]}
+                    if en_control:
+                        extra["en_control"] = en_control
                     if win_rel:
                         extra["win_rel"] = win_rel
                     if ancla:

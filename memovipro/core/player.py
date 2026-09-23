@@ -1351,10 +1351,93 @@ class Player:
             )
             time.sleep(0.4)
             return
-        if double:
+        # Pulsar en el MISMO SITIO del control donde se pulsó al grabar, no
+        # en su centro. En un botón da igual, pero en un selector de fecha
+        # el centro es el texto y no la flechita del desplegable, y en un
+        # grupo de opciones el centro no es la opción que se eligió.
+        punto = self._punto_dentro_del_control(ctrl, paso)
+        if punto is False:
+            # Control grande y no sabemos en qué parte de él se pulsó:
+            # adivinar sería peor. Se hace como antes, por posición.
+            if win_rel and self._click_window_relative(win_rel, button=button, double=double):
+                return
+            if img_b64 and self._click_imagen(img_b64, button=button, double=double):
+                return
+            if fallback and len(fallback) == 2:
+                self._click_xy(int(fallback[0]), int(fallback[1]), button=button, double=double)
+                return
+            punto = None
+        if punto:
+            self._click_xy(punto[0], punto[1], button=button, double=double)
+        elif double:
             ctrl.double_click_input(button=button)
         else:
             ctrl.click_input(button=button)
+
+    # Por debajo de este tamaño, pulsar en el centro del control es pulsar
+    # "el control" (un botón, una opción de menú, una fila). Por encima
+    # (un calendario, un grupo, un panel) importa en qué parte se pulsa.
+    CONTROL_PEQUENO_MAX_ALTO = 60
+    CONTROL_PEQUENO_MAX_ANCHO = 260
+
+    def _punto_dentro_del_control(self, ctrl, paso: Step):
+        """Dónde pulsar dentro del control que ha encontrado el selector.
+
+        Devuelve (x, y) si se sabe; None para pulsar en el centro (lo
+        correcto en controles pequeños); o False si el control es grande y
+        no hay forma de saber en qué parte se pulsó.
+
+          1. Grabaciones nuevas: guardan a qué distancia de la esquina del
+             control cayó el clic. Se pulsa ahí, esté donde esté ahora.
+          2. Grabaciones antiguas: si el punto grabado (siguiendo a su
+             ventana) sigue cayendo DENTRO del control, se pulsa ahí — es
+             exactamente lo que se hacía antes por posición.
+          3. Si no, en un control pequeño el centro vale; en uno grande no.
+        """
+        try:
+            r = ctrl.rectangle()
+            izq, arr, der, aba = int(r.left), int(r.top), int(r.right), int(r.bottom)
+        except Exception:
+            return None
+        ancho, alto = der - izq, aba - arr
+        if ancho <= 0 or alto <= 0:
+            return None
+
+        def dentro(p):
+            return p and izq <= p[0] <= der and arr <= p[1] <= aba
+
+        extra = paso.extra or {}
+        en = extra.get("en_control")
+        if isinstance(en, dict):
+            try:
+                dx, dy = int(en["dx"]), int(en["dy"])
+                w0, h0 = int(en.get("w") or 0), int(en.get("h") or 0)
+                if w0 > 0 and h0 > 0 and (abs(w0 - ancho) > 2 or abs(h0 - alto) > 2):
+                    # El control ha cambiado de tamaño: misma proporción.
+                    dx = round(dx * ancho / w0)
+                    dy = round(dy * alto / h0)
+                p = (izq + max(0, min(dx, ancho - 1)), arr + max(0, min(dy, alto - 1)))
+                return p
+            except Exception:
+                pass
+
+        candidatos = []
+        win_rel = extra.get("win_rel")
+        if win_rel:
+            p = self._punto_ventana_relativa(win_rel)
+            if isinstance(p, tuple):
+                candidatos.append(p)
+        fb = extra.get("fallback_xy")
+        if fb and len(fb) == 2:
+            candidatos.append((int(fb[0]), int(fb[1])))
+        for p in candidatos:
+            if dentro(p):
+                return p
+
+        if alto <= self.CONTROL_PEQUENO_MAX_ALTO or ancho <= self.CONTROL_PEQUENO_MAX_ANCHO \
+                and alto <= 2 * self.CONTROL_PEQUENO_MAX_ALTO:
+            return None
+        return False
 
     def _click_at_xy(self, paso: Step) -> None:
         """Clic sin selector.
@@ -1540,7 +1623,11 @@ class Player:
                 except Exception:
                     pass
 
-    def _click_window_relative(self, win_rel: dict, button: str = "left", double: bool = False) -> bool:
+    def _punto_ventana_relativa(self, win_rel: dict):
+        """Dónde cae AHORA el punto grabado, siguiendo a su ventana.
+
+        Devuelve (x, y), o None si no se puede calcular con fiabilidad.
+        En simulación devuelve "dry-run" (no hay que clicar)."""
         """Hace clic usando coordenadas relativas a una ventana.
 
         Busca la ventana por título (regex parcial), obtiene su rectángulo
@@ -1552,20 +1639,20 @@ class Player:
         (para que el caller pase al siguiente fallback).
         """
         if not win_rel:
-            return False
+            return None
         title = str(win_rel.get("title", ""))
         if not title:
-            return False
+            return None
         try:
             fx = float(win_rel.get("fx", 0.0))
             fy = float(win_rel.get("fy", 0.0))
         except (TypeError, ValueError):
-            return False
+            return None
         if self.dry_run:
             logger.info("[dry-run] click relativo a ventana '{}' fx={} fy={}", title, fx, fy)
-            return True
+            return "dry-run"
         if not _HAS_PYWINAUTO:
-            return False
+            return None
         try:
             # El título viene capturado LITERAL por el recorder: hay que
             # escaparlo. "Doc1 [Modo compatibilidad]" sin escapar es una
@@ -1573,14 +1660,14 @@ class Player:
             # y "Notepad++" directamente lanza re.error.
             win = Desktop(backend="uia").window(title_re=f".*{re.escape(title)}.*")
             if not win.exists(timeout=1.0):
-                return False
+                return None
             # Una ventana MINIMIZADA casa igual (pywinauto no filtra por
             # visibilidad) y su rectángulo es del orden de (-32000,-32000):
             # el clic se iba fuera de la pantalla.
             try:
                 if win.is_minimized() or not win.is_visible():
                     logger.debug("Ventana '{}' minimizada u oculta: sin coords relativas", title)
-                    return False
+                    return None
             except Exception:
                 pass
             r = win.rectangle()
@@ -1603,7 +1690,7 @@ class Player:
                     "Ventana '{}' redimensionada ({}x{} → {}x{}): sin coords relativas",
                     title, w_grab, h_grab, w_ahora, h_ahora,
                 )
-                return False
+                return None
             else:
                 # Macro antigua, sin tamaño guardado: comportamiento de
                 # siempre (escalado por fracciones), con el redondeo bien.
@@ -1611,8 +1698,18 @@ class Player:
                 y = int(round(r.top + fy * h_ahora))
         except Exception as exc:
             logger.debug("click_window_relative falló para '{}': {}", title, exc)
+            return None
+        return (x, y)
+
+    def _click_window_relative(self, win_rel: dict, button: str = "left", double: bool = False) -> bool:
+        """Clica el punto grabado siguiendo a su ventana (ver
+        _punto_ventana_relativa). True si clicó."""
+        punto = self._punto_ventana_relativa(win_rel)
+        if punto == "dry-run":
+            return True
+        if not punto:
             return False
-        self._click_xy(x, y, button=button, double=double)
+        self._click_xy(punto[0], punto[1], button=button, double=double)
         return True
 
     def _click_imagen(self, img_b64: str, button: str = "left", double: bool = False) -> bool:

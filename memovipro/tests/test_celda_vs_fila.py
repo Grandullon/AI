@@ -133,7 +133,9 @@ def test_el_selector_completo_usa_la_fila(monkeypatch):
             "D", (), {"from_point": staticmethod(lambda x, y: celda)})(),
         raising=False,
     )
-    sel, desc, _win, ancla = rec._selector_desde_punto(300, 160)
+    sel, desc, _win, ancla, en_control = rec._selector_desde_punto(300, 160)
+    # Y apunta en qué parte de la fila cayó el clic
+    assert en_control == {"dx": 100, "dy": 10, "w": 200, "h": 20}
     assert sel.name == "macros"
     assert sel.control_type == "ListItem"
     assert desc == "macros"
