@@ -50,6 +50,41 @@ class Selector:
     def is_empty(self) -> bool:
         return not any([self.control_type, self.name, self.auto_id, self.class_name, self.title])
 
+    def identifica_algo(self) -> bool:
+        """¿Este selector señala UN control concreto, o vale para
+        cualquiera?
+
+        Buscar sin esta comprobación es peor que no buscar: un selector
+        que solo dice «Button» casa con el PRIMER botón de la ventana, y
+        se acaba pulsando lo que no es. Hace falta:
+
+          - un nombre propio («Guardar», «Incidencias»), o
+          - un identificador que no cambie entre ejecuciones.
+
+        Lo segundo importa en aplicaciones Delphi como GERHONTE: ahí el
+        identificador automático es el número de ventana del sistema
+        («11011536»), distinto en cada arranque. Un número largo se toma
+        por volátil y no cuenta como identificación.
+        """
+        if self.is_empty():
+            return False
+        if (self.name or "").strip():
+            return True
+        auto_id = str(self.auto_id or "").strip()
+        if auto_id and not _auto_id_volatil(auto_id):
+            return True
+        return False
+
+
+def _auto_id_volatil(auto_id: str) -> bool:
+    """¿Es un identificador que cambia en cada ejecución?
+
+    Los de Delphi/VCL son el número de ventana del sistema: solo dígitos
+    y largo. Los de verdad suelen llevar letras («FileTypeControlHost»)
+    o son cortos y estables («1»)."""
+    a = str(auto_id or "").strip()
+    return a.isdigit() and len(a) >= 5
+
 
 @dataclass
 class Step:

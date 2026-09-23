@@ -170,3 +170,90 @@ def test_la_macro_real_del_usuario_tiene_selectores_utiles():
         s = Selector(control_type=tipo, name=nombre, auto_id=auto_id)
         assert not s.is_empty()
         assert s.name        # hay nombre: se puede buscar aunque se mueva
+
+
+# ==================== un selector tiene que identificar ALGO ====================
+#
+# Regresión grave: usar el selector SIEMPRE hizo que un tercio de los
+# clics de cada macro pulsaran el control equivocado. «Button» a secas
+# casa con el primer botón de la ventana, y los paneles de Delphi traen
+# un identificador que cambia en cada ejecución.
+
+def test_un_nombre_identifica():
+    for tipo, nombre in (("Button", "Guardar"), ("TreeItem", "Incidencias"),
+                         ("MenuItem", "Archivo"), ("ListItem", "EXPEDIENTES")):
+        assert Selector(control_type=tipo, name=nombre).identifica_algo()
+
+
+def test_solo_el_tipo_NO_identifica():
+    """«El primer botón de la ventana» no es un destino."""
+    assert not Selector(control_type="Button").identifica_algo()
+    assert not Selector(control_type="Pane").identifica_algo()
+    assert not Selector(control_type="Edit").identifica_algo()
+
+
+def test_un_identificador_de_delphi_no_identifica():
+    """En GERHONTE el identificador es el número de ventana del sistema y
+    cambia en cada arranque: con él no se encuentra nada, y sin él la
+    búsqueda casa con cualquier panel."""
+    for aid in ("11011536", "136866", "71632", "71606"):
+        assert not Selector(control_type="Pane", auto_id=aid).identifica_algo()
+
+
+def test_un_identificador_estable_si_identifica():
+    assert Selector(control_type="ComboBox",
+                    auto_id="FileTypeControlHost").identifica_algo()
+    assert Selector(control_type="Button", auto_id="1").identifica_algo()
+
+
+def test_un_selector_vacio_no_identifica():
+    assert not Selector().identifica_algo()
+    assert not Selector(class_name="TPanel").identifica_algo()
+
+
+def test_los_pasos_flojos_vuelven_a_la_posicion(monkeypatch):
+    """Los nueve pasos de su macro con selector flojo deben ir por
+    posición, como antes, sin tocar el buscador."""
+    from core.player import Player
+
+    p = Player.__new__(Player)
+    p.dry_run = False
+    p.macro = Macro(nombre="m", pasos=[], ventana_principal="")
+    orden = []
+    monkeypatch.setattr(Player, "_resolve_control",
+                        lambda self, paso: orden.append("SELECTOR") or _Ctrl())
+    monkeypatch.setattr(Player, "_click_window_relative",
+                        lambda self, *a, **k: orden.append("VENTANA") or True)
+
+    Player._click_control(p, _paso(name=None, control_type="Button"))
+    assert orden == ["VENTANA"]      # ni se intenta buscar
+
+    orden.clear()
+    Player._click_control(p, _paso(name=None, control_type="Pane", auto_id="11011536"))
+    assert orden == ["VENTANA"]
+
+
+def test_los_pasos_buenos_siguen_usando_el_nombre(monkeypatch):
+    from core.player import Player
+
+    p = Player.__new__(Player)
+    p.dry_run = False
+    p.macro = Macro(nombre="m", pasos=[], ventana_principal="")
+    orden = []
+    monkeypatch.setattr(Player, "_resolve_control",
+                        lambda self, paso: orden.append("SELECTOR") or _Ctrl())
+    monkeypatch.setattr(Player, "_click_window_relative",
+                        lambda self, *a, **k: orden.append("VENTANA") or True)
+    Player._click_control(p, _paso(name="Guardar"))
+    assert orden == ["SELECTOR"]
+
+
+def test_el_reintento_sin_identificador_exige_nombre():
+    """Quitar el identificador de «Pane auto_id=71606» dejaría una
+    búsqueda que casa con cualquier panel."""
+    from core.player import Player
+    p = Player.__new__(Player)
+    spec = _Spec(lambda kw: "auto_id" not in kw)
+    assert Player._buscar_en(p, spec, {
+        "control_type": "Pane", "auto_id": "71606"}, espera=0.1) is None
+    assert len(spec.pedidos) == 1        # no hubo segundo intento

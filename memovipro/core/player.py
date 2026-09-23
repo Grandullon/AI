@@ -859,6 +859,10 @@ class Player:
             ctrl = self._buscar_en(spec, kwargs, espera)
             if ctrl is not None:
                 return ctrl
+            # Sabemos en qué ventana vive el control y ahí no está: no
+            # tiene sentido rebuscar por todo el escritorio (lento, y se
+            # corre el riesgo de encontrar un homónimo en otra ventana).
+            raise RuntimeError(f"Control {kwargs} no está en su ventana")
 
         # 2. La ventana principal de la macro (si alguien la rellenó).
         if self.macro.ventana_principal:
@@ -900,7 +904,7 @@ class Player:
         el tipo de control se mantienen.
         """
         intentos = [kwargs]
-        if kwargs.get("auto_id") and (kwargs.get("title") or kwargs.get("class_name")):
+        if kwargs.get("auto_id") and kwargs.get("title"):
             sin_id = {k: v for k, v in kwargs.items() if k != "auto_id"}
             intentos.append(sin_id)
         for n, criterios in enumerate(intentos):
@@ -1127,12 +1131,26 @@ class Player:
         button = str(extra.get("button", "left"))
         double = bool(extra.get("double", False))
 
-        # El selector va SIEMPRE primero. Antes solo se usaba si la macro
-        # tenía rellenado el campo «ventana principal», y como casi nadie
-        # lo rellena, en la práctica nunca se buscaba el botón por su
-        # nombre: se clicaba en las coordenadas donde estaba al grabar. Por
-        # eso una macro dejaba de funcionar en cuanto algo se recolocaba,
-        # teniendo guardado «el botón Guardar» o «el elemento Incidencias».
+        # El selector va primero, PERO solo si identifica algo. Un
+        # selector que solo dice «Button» casa con el primer botón de la
+        # ventana: usarlo es peor que no usarlo, porque se pulsa lo que no
+        # es en vez de fallar. En macros reales, un tercio de los clics
+        # tienen selectores así (paneles de Delphi sin nombre, con un
+        # identificador que cambia en cada ejecución); esos siguen yendo
+        # por posición, como siempre.
+        sel = paso.selector
+        if sel is None or not sel.identifica_algo():
+            if win_rel and self._click_window_relative(win_rel, button=button, double=double):
+                return
+            if img_b64 and self._click_imagen(img_b64, button=button, double=double):
+                return
+            if ancla and self._click_por_ancla(ancla, button=button, double=double):
+                return
+            if fallback and len(fallback) == 2:
+                self._click_xy(int(fallback[0]), int(fallback[1]),
+                               button=button, double=double)
+                return
+
         try:
             ctrl = self._resolve_control(paso)
         except Exception as exc:
