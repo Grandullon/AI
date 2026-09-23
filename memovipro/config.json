@@ -30,5 +30,7 @@
     "esperar_s": 15,
     "intervalo_s": 0.8,
     "cerrar_titulos": []
-  }
+  },
+  "_comentario_espera_listo": "Segundos que se espera como mucho a que la aplicación deje de estar ocupada (reloj de arena, ventana deshabilitada o sin responder) antes de cada clic o tecleo. 0 = no esperar.",
+  "espera_listo_s": 10
 }

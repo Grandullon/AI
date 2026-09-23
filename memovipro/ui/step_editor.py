@@ -138,7 +138,8 @@ class StepEditor(QWidget):
               ("↶  Deshacer", self._deshacer, None)],
              [("Subir", lambda: self._move(-1), None),
               ("Bajar", lambda: self._move(1), None),
-              ("Activar / Desactivar", self._toggle_activo, None)]],
+              ("Activar / Desactivar", self._toggle_activo, None)],
+             [("⚙  Opciones del paso", self._opciones_paso, None)]],
             # Comprobar, probar y guardar
             [[("🔎  Revisar macro", self._revisar_macro, "herramienta")],
              [("Punto de análisis", self._toggle_breakpoint, None),
@@ -201,6 +202,10 @@ class StepEditor(QWidget):
                 desc = f"{desc}  ✓ventana:'{paso.verificar_ventana}'"
             if paso.verificar_texto:
                 desc = f"{desc}  ✓texto:'{paso.verificar_texto}'"
+            from .opciones_paso_dialog import marcas_del_paso
+            marcas = marcas_del_paso(paso)
+            if marcas:
+                desc = f"{desc}  {marcas}"
             # Marca ● roja en la columna # si el paso es punto de análisis.
             num_txt = f"🔴 {i + 1}" if i in self._breakpoints else str(i + 1)
             valores = [
@@ -601,6 +606,32 @@ class StepEditor(QWidget):
             self.window().statusBar().showMessage(texto, 4000)
         except Exception:
             pass
+
+    def _opciones_paso(self) -> None:
+        """Método (ratón / simulado) y reintentos de los pasos elegidos."""
+        from .opciones_paso_dialog import OpcionesPasoDialog, aplicar_opciones
+        filas = self._filas_seleccionadas()
+        if not filas:
+            QMessageBox.information(self, "Selecciona pasos",
+                                    "Pincha uno o varios pasos de la tabla.")
+            return
+        primero = self.macro.pasos[filas[0]]
+        extra = primero.extra or {}
+        dlg = OpcionesPasoDialog(
+            len(filas),
+            metodo=str(extra.get("metodo") or "raton"),
+            reintentos=primero.reintentos,
+            espera_s=float(extra.get("reintento_espera_s") or 0.0),
+            parent=self,
+        )
+        if not dlg.exec():
+            return
+        metodo, reintentos, espera = dlg.valores()
+        self._snapshot(f"opciones de {len(filas)} paso(s)")
+        for f in filas:
+            aplicar_opciones(self.macro.pasos[f], metodo, reintentos, espera)
+        self._refresh_table()
+        self._seleccionar_filas(filas)
 
     def _revisar_macro(self) -> None:
         """Repasa la macro y enseña los avisos (ver core/revisor_macro)."""

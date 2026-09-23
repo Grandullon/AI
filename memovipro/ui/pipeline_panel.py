@@ -323,11 +323,13 @@ class PipelinePanel(QWidget):
             return
         self._sync_from_form()
         self.log_view.clear()
+        from core.config_ejecucion import opciones_ejecucion
         self._runner = PipelineRunner(
             pipeline=self.pipeline,
             macros_dir=self.macros_dir,
             screenshots_dir=self.data_dir / "screenshots",
             data_dir=self.data_dir,
+            opciones=opciones_ejecucion(self.data_dir.parent / "config.json"),
         )
         self._thread = _PipelineThread(self._runner)
         self._thread.log_line.connect(self.log_view.append)

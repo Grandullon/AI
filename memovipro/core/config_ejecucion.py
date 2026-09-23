@@ -33,10 +33,18 @@ def opciones_ejecucion(config_path) -> dict:
       - ignorar_popups: títulos que el vigilante NO debe tratar como
         incidencia (avisos normales de la aplicación).
       - politica_intrusas: qué hacer si se cuela una ventana delante.
+      - espera_listo_s: cuánto esperar como mucho a que la aplicación
+        esté lista antes de cada acción (0 = no esperar).
     """
     cfg = leer_config(config_path)
+    from .espera_listo import ESPERA_LISTO_S
     from .ventana_intrusa import politica_desde_config
+    try:
+        espera = max(0.0, float(cfg.get("espera_listo_s", ESPERA_LISTO_S)))
+    except (TypeError, ValueError):
+        espera = ESPERA_LISTO_S
     return {
         "ignorar_popups": list(cfg.get("popup_titulos_ignorar", []) or []),
         "politica_intrusas": politica_desde_config(cfg),
+        "espera_listo_s": espera,
     }

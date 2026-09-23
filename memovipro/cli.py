@@ -60,6 +60,12 @@ from core.step_model import Macro
 set_dpi_awareness()
 
 
+def _opciones_ejecucion() -> dict:
+    """Mismas opciones de config.json que usa la aplicación gráfica."""
+    from core.config_ejecucion import opciones_ejecucion
+    return opciones_ejecucion(ROOT / "config.json")
+
+
 def _cargar_config() -> dict:
     p = ROOT / "config.json"
     if not p.exists():
@@ -178,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
             macros_dir=macros_dir,
             screenshots_dir=screenshots_dir,
             data_dir=data_dir,
+            opciones=_opciones_ejecucion(),
         )
         try:
             psum = runner.run()
@@ -210,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
             screenshots_dir=screenshots_dir,
             data_dir=data_dir,
             polling_watchdog_ms=int(cfg.get("polling_watchdog_ms", 300)),
-            ignorar_popups=list(cfg.get("popup_titulos_ignorar", []) or []),
+            **_opciones_ejecucion(),
         )
         try:
             rsum = runner.run()
@@ -248,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
         screenshots_dir=screenshots_dir,
         data_dir=data_dir,
         polling_watchdog_ms=int(cfg.get("polling_watchdog_ms", 300)),
-        ignorar_popups=list(cfg.get("popup_titulos_ignorar", []) or []),
+        **_opciones_ejecucion(),
         dry_run=args.dry_run,
         reintentar_ko_al_final=not args.no_retry,
         smtp_config=smtp_cfg,

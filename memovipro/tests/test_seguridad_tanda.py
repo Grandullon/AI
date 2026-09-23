@@ -75,6 +75,7 @@ def _runner_falso(resultados, max_ko=3):
     r.max_ko_seguidos = max_ko
     r.cortado_por = ""
     r.politica_intrusas = None
+    r.espera_listo_s = None
 
     class _Chk:
         def marcar_ok(self, d): pass

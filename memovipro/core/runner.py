@@ -42,6 +42,7 @@ class MacroRunner:
         smtp_config: SmtpConfig | None = None,
         max_ko_seguidos: int | None = None,
         politica_intrusas=None,
+        espera_listo_s=None,
     ):
         self.macro = macro
         self.excel_dnis = Path(excel_dnis)
@@ -63,6 +64,7 @@ class MacroRunner:
         self.polling_watchdog_ms = polling_watchdog_ms
         self.ignorar_popups = ignorar_popups or []
         self.politica_intrusas = politica_intrusas
+        self.espera_listo_s = espera_listo_s
         self.on_status = on_status
         self.on_dni_done = on_dni_done
         self.dry_run = dry_run
@@ -103,6 +105,7 @@ class MacroRunner:
                 logger=self.excel_logger,
                 ignorar_popups=self.ignorar_popups,
                 politica_intrusas=self.politica_intrusas,
+                espera_listo_s=self.espera_listo_s,
                 polling_watchdog_ms=self.polling_watchdog_ms,
                 on_status=self.on_status,
                 dry_run=self.dry_run,

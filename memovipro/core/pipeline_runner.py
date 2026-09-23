@@ -50,8 +50,14 @@ class PipelineRunner:
         on_step_done: Callable[[int, PipelineStepResult], None] | None = None,
         on_log: Callable[[str], None] | None = None,
         settle_entre_macros_s: float = 0.8,
+        opciones: dict | None = None,
     ):
         self.pipeline = pipeline
+        # Opciones de config.json (ventanas a ignorar, paciencia con las
+        # intrusas, espera a que la aplicación esté lista). Antes las
+        # cadenas no recibían NINGUNA: cada macro de la cadena corría sin
+        # nada de eso, aunque suelta sí lo tuviera.
+        self.opciones = dict(opciones or {})
         self.macros_dir = Path(macros_dir)
         self.screenshots_dir = Path(screenshots_dir)
         self.data_dir = Path(data_dir)
@@ -162,6 +168,7 @@ class PipelineRunner:
                 velocidad=paso.velocidad,
                 screenshots_dir=self.screenshots_dir,
                 data_dir=self.data_dir,
+                **self.opciones,
             )
             replay_summary: ReplaySummary = self._current_replay.run()
             self._current_replay = None

@@ -64,6 +64,7 @@ class Player:
         breakpoints: set[int] | None = None,
         run_mode: str = "step",
         politica_intrusas=None,
+        espera_listo_s: float | None = None,
     ):
         self.macro = macro
         self.screenshots_dir = Path(screenshots_dir)
@@ -71,6 +72,9 @@ class Player:
         self.ignorar_popups = ignorar_popups or []
         # Qué hacer si se cuela una ventana delante (ver ventana_intrusa).
         self.politica_intrusas = politica_intrusas
+        # Cuánto esperar como mucho a que la aplicación esté lista antes
+        # de cada acción (None = el valor por defecto; 0 = no esperar).
+        self.espera_listo_s = espera_listo_s
         self.polling_watchdog_ms = polling_watchdog_ms
         self.on_status = on_status
         self.dry_run = dry_run
@@ -544,16 +548,57 @@ class Player:
             restante -= paso_t
 
     def _ejecutar_paso(self, paso: Step, idx: int) -> None:
-        intentos = paso.reintentos + 1
+        """Ejecuta el paso, reintentándolo si falla.
+
+        Cada paso se reintenta `paso.reintentos` veces (2 por defecto).
+        La espera entre intentos es la del paso (`reintento_espera_s`) o,
+        si no la tiene, creciente: 0,5 s, 1 s, 2 s... Con una aplicación
+        lenta conviene subirla: el reintento no sirve de nada si llega
+        antes de que la pantalla esté lista.
+
+        Solo se reintenta la ACCIÓN, no la verificación que va después:
+        si el clic se dio y lo que falla es la comprobación, repetir el
+        clic podría duplicar un «Guardar».
+        """
+        intentos = max(0, int(paso.reintentos)) + 1
+        espera_fija = (paso.extra or {}).get("reintento_espera_s")
         last_err: Exception | None = None
         for intento in range(intentos):
+            if intento and self._abort.is_set():
+                break
             try:
                 self._dispatch(paso)
+                if intento:
+                    logger.info("Paso {} resuelto al intento {} de {}",
+                                idx + 1, intento + 1, intentos)
                 return
             except Exception as exc:
                 last_err = exc
-                time.sleep(min(0.5 * (2 ** intento), 4.0))
+                if intento + 1 >= intentos:
+                    break
+                if espera_fija is not None:
+                    try:
+                        pausa = max(0.0, float(espera_fija))
+                    except (TypeError, ValueError):
+                        pausa = min(0.5 * (2 ** intento), 4.0)
+                else:
+                    pausa = min(0.5 * (2 ** intento), 4.0)
+                # Antes los reintentos eran mudos: un paso que fallaba dos
+                # veces y acertaba a la tercera no dejaba rastro, y no había
+                # forma de saber qué pasos iban justos.
+                logger.warning(
+                    "Paso {} falló (intento {} de {}): {} — reintento en {:.1f}s",
+                    idx + 1, intento + 1, intentos, exc, pausa,
+                )
+                time.sleep(pausa)
         raise StepFailed(motivo=f"{type(last_err).__name__}: {last_err}", paso_idx=idx, paso=paso)
+
+    # Pasos que ACTÚAN sobre la aplicación: antes de ellos se espera a que
+    # esté lista (ver core/espera_listo).
+    _TIPOS_QUE_ACTUAN = frozenset({
+        StepType.CLICK_CONTROL, StepType.CLICK_AT_XY, StepType.CLICK_OCR_TEXT,
+        StepType.TYPE_TEXT, StepType.SEND_KEYS, StepType.SCROLL, StepType.DRAG,
+    })
 
     def _dispatch(self, paso: Step) -> None:
         tipo = paso.tipo
@@ -567,20 +612,31 @@ class Player:
             self._wait_for_window(paso.titulo or "", paso.timeout_s)
             return
         if tipo == StepType.CLICK_CONTROL:
+            # Modo simulado: pulsar el control "por dentro", sin ratón y
+            # sin traer la ventana al frente. Si no se puede (el control no
+            # lo admite, o no se encuentra), se sigue por el camino normal.
+            if self._metodo(paso) == "simular" and self._click_simulado(paso):
+                return
             self._comprobar_foco_esperado(paso)
+            self._esperar_listo()
             self._click_control(paso)
             return
         if tipo == StepType.CLICK_AT_XY:
             self._comprobar_foco_esperado(paso)
+            self._esperar_listo()
             self._click_at_xy(paso)
             return
         if tipo == StepType.TYPE_TEXT:
+            if self._metodo(paso) == "simular" and self._escribir_simulado(paso):
+                return
+            self._esperar_listo()
             self._type_text(paso)
             return
         if tipo == StepType.SEND_KEYS:
             if self.dry_run:
                 logger.info("[dry-run] send_keys → {}", paso.valor)
                 return
+            self._esperar_listo()
             self._send_keys_seguro(paso.valor or "")
             return
         if tipo == StepType.WAIT_UNTIL:
@@ -606,12 +662,14 @@ class Player:
             )
             return
         if tipo == StepType.SCROLL:
+            self._esperar_listo()
             extra = paso.extra or {}
             x, y = int(extra.get("x", 0)), int(extra.get("y", 0))
             dx, dy = int(extra.get("dx", 0)), int(extra.get("dy", 0))
             self._scroll_xy(x, y, dx, dy)
             return
         if tipo == StepType.DRAG:
+            self._esperar_listo()
             extra = paso.extra or {}
             x1, y1 = int(extra.get("x1", 0)), int(extra.get("y1", 0))
             x2, y2 = int(extra.get("x2", 0)), int(extra.get("y2", 0))
@@ -949,6 +1007,116 @@ class Player:
         except Exception as exc:
             logger.debug("No se pudo acotar a la ventana «{}»: {}", titulo, exc)
         return None
+
+    # ---- 1. Esperar a que la aplicación esté lista (WaitForReady) ----
+    def _esperar_listo(self) -> None:
+        """Espera a que la ventana de delante deje de estar ocupada.
+
+        Nunca hace fallar el paso: si se agota el tiempo, sigue como antes
+        y lo deja anotado. Esperar solo retrasa; no cambia a dónde va el
+        clic. Si la aplicación está lista, vuelve al instante.
+        """
+        if getattr(self, "dry_run", False):
+            return
+        espera = getattr(self, "espera_listo_s", None)
+        if espera is None:
+            from .espera_listo import ESPERA_LISTO_S
+            espera = ESPERA_LISTO_S
+        if espera <= 0:
+            return
+        from .espera_listo import esperar_listo
+        res = esperar_listo(timeout_s=espera)
+        if res.segundos >= 0.5:
+            if res.listo:
+                logger.info(
+                    "Aplicación ocupada ({}): esperé {:.1f}s a que estuviera lista",
+                    res.motivo, res.segundos,
+                )
+            else:
+                logger.warning(
+                    "La aplicación seguía ocupada ({}) tras {:.0f}s; sigo igualmente",
+                    res.motivo, res.segundos,
+                )
+
+    # ---- 2. Modo simulado: actuar sin ratón y sin foco ----
+    @staticmethod
+    def _metodo(paso: Step) -> str:
+        return str((paso.extra or {}).get("metodo") or "raton").strip().lower()
+
+    def _click_simulado(self, paso: Step) -> bool:
+        """Pulsa el control "por dentro" (patrones de accesibilidad), sin
+        mover el ratón ni traer la ventana al frente. True si lo logró.
+
+        Es lo que UiPath llama «Simulate». Donde funciona, el problema de
+        las ventanas abiertas por detrás desaparece: no hace falta que la
+        ventana esté delante. Solo se intenta con un selector que
+        identifique un control concreto, y con un clic izquierdo simple
+        sin modificadores (un doble clic o un Ctrl+clic no tienen
+        equivalente "por dentro").
+        """
+        if getattr(self, "dry_run", False):
+            return False
+        extra = paso.extra or {}
+        if extra.get("double") or str(extra.get("button", "left")) != "left" \
+                or extra.get("modifiers"):
+            return False
+        sel = paso.selector
+        if sel is None or not sel.identifica_algo():
+            return False
+        try:
+            ctrl = self._resolve_control(paso)
+        except Exception as exc:
+            logger.info("Modo simulado: control no encontrado ({}); voy con el ratón", exc)
+            return False
+        # Por orden: botón/menú (invocar), casilla (conmutar), elemento de
+        # lista o árbol (seleccionar).
+        for accion in ("invoke", "toggle", "select"):
+            fn = getattr(ctrl, accion, None)
+            if fn is None:
+                continue
+            try:
+                fn()
+                logger.info("Modo simulado: «{}» → {}()",
+                            paso.descripcion or sel.name, accion)
+                return True
+            except Exception:
+                continue
+        logger.info("Modo simulado: el control no admite pulsación interna; voy con el ratón")
+        return False
+
+    def _escribir_simulado(self, paso: Step) -> bool:
+        """Pone el texto directamente en el campo, sin teclear ni foco.
+
+        Solo es posible si el paso sabe EN QUÉ campo escribir (tiene un
+        selector que lo identifica). Los pasos de escritura grabados no
+        suelen tenerlo, porque se teclea donde esté el cursor: a esos se
+        les puede asignar el campo con el Inspector.
+        """
+        if getattr(self, "dry_run", False):
+            return False
+        sel = paso.selector
+        if sel is None or not sel.identifica_algo():
+            return False
+        texto = paso.valor or ""
+        try:
+            ctrl = self._resolve_control(paso)
+        except Exception:
+            return False
+        for fn_nombre in ("set_edit_text", "set_value"):
+            fn = getattr(ctrl, fn_nombre, None)
+            if fn is None:
+                continue
+            try:
+                fn(texto)
+                logger.info("Modo simulado: texto puesto en «{}»", sel.name or sel.control_type)
+                return True
+            except Exception:
+                continue
+        try:
+            ctrl.iface_value.SetValue(texto)
+            return True
+        except Exception:
+            return False
 
     def _comprobar_foco_esperado(self, paso: Step) -> None:
         """Pone delante la ventana de ESTE paso antes de actuar.
