@@ -102,6 +102,9 @@ class EventoCrudo:
     # dentro del enganche del ratón (ver _arrancar_miniaturas), así que el
     # evento se crea con el sobre vacío y se lee al construir la macro.
     img_holder: dict | None = None
+    # Sobre con el elemento identificado AL PULSAR (ver
+    # _encolar_resolucion_al_pulsar).
+    res_holder: dict | None = None
     # Selector/ancla resueltos EN EL MOMENTO del clic por el hilo
     # resolutor. Si está a None, `construir_macro` los resuelve al final
     # (peor: la pantalla ya ha cambiado).
@@ -723,9 +726,13 @@ class Recorder:
                 return
             if tarea is None:       # señal de parada
                 return
-            evt, x, y = tarea
+            destino, x, y = tarea
             try:
-                evt.resuelto = _selector_desde_punto(x, y)
+                res = _selector_desde_punto(x, y)
+                if isinstance(destino, dict):
+                    destino["res"] = res
+                else:
+                    destino.resuelto = res
             except Exception as exc:
                 logger.debug("Resolución en vivo falló en ({},{}): {}", x, y, exc)
             finally:
@@ -733,6 +740,23 @@ class Recorder:
                     cola.task_done()
                 except Exception:
                     pass
+
+    def _encolar_resolucion_al_pulsar(self, x: int, y: int) -> dict:
+        """Pide identificar el elemento YA, en el momento de pulsar.
+
+        Hay que hacerlo al pulsar y no al soltar: muchos desplegables se
+        cierran con el propio clic —un calendario al elegir «Hoy», un
+        menú al elegir una opción—. Si se identifica al soltar, el
+        desplegable ya ha desaparecido y se guarda lo que había DETRÁS.
+        Devuelve el sobre donde llegará el resultado."""
+        sobre: dict = {"res": None}
+        cola = getattr(self, "_cola_resolver", None)
+        if cola is not None:
+            try:
+                cola.put((sobre, int(x), int(y)))
+            except Exception:
+                pass
+        return sobre
 
     def _encolar_resolucion(self, evt: EventoCrudo) -> None:
         cola = getattr(self, "_cola_resolver", None)
@@ -896,8 +920,10 @@ class Recorder:
             # Encolar la miniatura para que la capture OTRO hilo. Aquí
             # dentro no se puede: ver _arrancar_miniaturas.
             sobre = self._encolar_miniatura(int(x), int(y))
+            sobre_res = self._encolar_resolucion_al_pulsar(int(x), int(y))
             with self._lock:
                 self._press_pendiente = {
+                    "res_holder": sobre_res,
                     "x": int(x), "y": int(y),
                     "button": btn,
                     "modifiers": _modifiers_str(self._modifiers),
@@ -953,11 +979,13 @@ class Recorder:
             descripcion=self._descripcion_click(x, y, btn, mods, double=False),
             timestamp=ahora,
             img_holder=pendiente.get("img_holder"),
+            res_holder=pendiente.get("res_holder"),
         )
         self.eventos_crudos.append(evt)
-        # Resolver YA, con la pantalla como está ahora (en otro hilo, para
-        # no frenar la grabación).
-        self._encolar_resolucion(evt)
+        # Si por lo que sea no se pidió al pulsar, se pide ahora (mejor
+        # tarde que resolverlo al final de la grabación).
+        if evt.res_holder is None:
+            self._encolar_resolucion(evt)
 
     def _emitir_drag(self, pendiente: dict, x_release: int, y_release: int) -> None:
         """Emite un drag de (press.x, press.y) a (release.x, release.y)."""
@@ -1244,8 +1272,13 @@ class Recorder:
                 if resolver_selectores:
                     # Preferimos SIEMPRE lo resuelto en vivo: se calculó
                     # con la pantalla tal y como estaba al clicar.
-                    res = evt.resuelto if evt.resuelto is not None \
-                        else _selector_desde_punto(evt.x, evt.y)
+                    res = None
+                    if evt.res_holder is not None:
+                        res = evt.res_holder.get("res")     # tomado al pulsar
+                    if res is None:
+                        res = evt.resuelto                   # tomado al soltar
+                    if res is None:
+                        res = _selector_desde_punto(evt.x, evt.y)
                     # Se aceptan resultados de 4 o 5 elementos: el quinto
                     # (dónde cayó el clic dentro del control) es posterior.
                     sel, desc, win_rel, ancla = res[:4]

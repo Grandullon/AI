@@ -219,3 +219,53 @@ def test_el_editor_publica_los_identificadores():
     src = (ROOT / "ui" / "record_dialog.py").read_text(encoding="utf-8")
     fn = src.split("def _actualizar_zonas_excluidas")[1].split("\n    def ")[0]
     assert "hwnds_propios" in fn and "winId()" in fn
+
+
+# ==================== identificar al PULSAR, no al soltar ====================
+
+def test_un_desplegable_que_se_cierra_con_el_clic_se_graba_bien(monkeypatch):
+    """Caso real: el calendario de GERHONTE se cierra al pulsar «Hoy».
+    Identificando el elemento al SOLTAR, el calendario ya no está y se
+    guardaba lo que había detrás."""
+    import time as _t
+    import core.recorder as rec
+    import core.image_match as im
+    from core.step_model import Selector
+
+    monkeypatch.setattr(im, "capturar_region_png", lambda x, y, **kw: None)
+    pantalla = {"ahora": "Hoy"}
+    monkeypatch.setattr(
+        rec, "_selector_desde_punto",
+        lambda x, y: (Selector(control_type="Button", name=pantalla["ahora"]),
+                      pantalla["ahora"], None, None, None),
+    )
+    r = _recorder_minimo()
+    r._arrancar_miniaturas()
+    r._arrancar_resolutor()
+
+    r._on_click_impl(10, 20, _Boton(), True)            # pulsar sobre «Hoy»
+    sobre = r._press_pendiente["res_holder"]
+    t0 = _t.time()
+    while sobre["res"] is None and _t.time() - t0 < 2:
+        _t.sleep(0.01)
+    pantalla["ahora"] = "Borradas"                      # el calendario se cierra
+    r._on_click_impl(10, 20, _Boton(), False)           # soltar
+
+    r._parar_resolutor()
+    r._parar_miniaturas()
+    macro = Recorder.construir_macro(r.eventos_crudos, resolver_selectores=True)
+    assert macro.pasos[0].selector.name == "Hoy"
+
+
+def test_si_no_hubo_resolucion_al_pulsar_se_hace_al_soltar(monkeypatch):
+    """Red de seguridad: eventos sin sobre siguen resolviéndose."""
+    import core.recorder as rec
+    from core.step_model import Selector
+    monkeypatch.setattr(
+        rec, "_selector_desde_punto",
+        lambda x, y: (Selector(control_type="Button", name="Tarde"), "Tarde",
+                      None, None, None))
+    evt = EventoCrudo(tipo="click", x=1, y=2, timestamp=1.0,
+                      res_holder={"res": None})
+    macro = Recorder.construir_macro([evt], resolver_selectores=True)
+    assert macro.pasos[0].selector.name == "Tarde"
